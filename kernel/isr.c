@@ -4,6 +4,7 @@
 #include "idt.h"
 #include "gdt.h"
 #include "vga.h"
+#include "irq.h"
 
 extern void isr0(void);  extern void isr1(void);  extern void isr2(void);
 extern void isr3(void);  extern void isr4(void);  extern void isr5(void);
@@ -62,6 +63,12 @@ void isr_install(void) {
 }
 
 void isr_handler(struct regs *r) {
+    /* Vectors 32-47 are hardware interrupts (IRQ 0-15), not CPU exceptions. */
+    if (r->int_no >= 32 && r->int_no < 48) {
+        irq_dispatch(r);
+        return;
+    }
+
     /* The breakpoint exception is harmless: report it and keep running.
      * It lets us test that the whole IDT path works. */
     if (r->int_no == 3) {

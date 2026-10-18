@@ -64,6 +64,33 @@ ISR_ERR   29
 ISR_ERR   30
 ISR_NOERR 31
 
+; Hardware interrupts: IRQ n arrives on vector 32 + n (after the PIC remap).
+; They share isr_common with the CPU exceptions.
+%macro IRQ 2
+global irq%1
+irq%1:
+    push dword 0            ; dummy error code
+    push dword %2           ; interrupt number (vector)
+    jmp isr_common
+%endmacro
+
+IRQ 0, 32
+IRQ 1, 33
+IRQ 2, 34
+IRQ 3, 35
+IRQ 4, 36
+IRQ 5, 37
+IRQ 6, 38
+IRQ 7, 39
+IRQ 8, 40
+IRQ 9, 41
+IRQ 10, 42
+IRQ 11, 43
+IRQ 12, 44
+IRQ 13, 45
+IRQ 14, 46
+IRQ 15, 47
+
 isr_common:
     pusha                   ; push eax, ecx, edx, ebx, esp, ebp, esi, edi
     mov ax, ds

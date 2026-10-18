@@ -5,7 +5,8 @@ CFLAGS  = -m32 -ffreestanding -fno-stack-protector -fno-pic -O2 -Wall -Wextra -I
 LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
 OBJS = build/boot.o build/gdt_flush.o build/isr_stubs.o \
-       build/kernel.o build/vga.o build/gdt.o build/idt.o build/isr.o
+       build/kernel.o build/vga.o build/gdt.o build/idt.o build/isr.o \
+       build/pic.o build/irq.o build/timer.o build/keyboard.o
 
 all: build/minios.bin
 

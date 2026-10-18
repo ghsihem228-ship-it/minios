@@ -7,8 +7,8 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] Boot via Multiboot (GRUB / QEMU)
 - [x] VGA text-mode output
 - [x] GDT and IDT, CPU exceptions ([notes](docs/02-gdt-idt.md))
-- [ ] Hardware interrupts (PIC, timer)
-- [ ] Keyboard driver
+- [x] Hardware interrupts (PIC, timer) ([notes](docs/03-interrupts-keyboard.md))
+- [x] Keyboard driver
 - [ ] Physical memory manager (bitmap frame allocator)
 - [ ] Paging and a kernel heap (`kmalloc` / `kfree`)
 - [ ] Multitasking with a round-robin scheduler
@@ -37,19 +37,23 @@ make run    # boots the kernel in QEMU
 make clean
 ```
 
-Expected output: `MiniOS v0.2` followed by green `[ OK ]` lines for the boot, GDT, IDT and a breakpoint self-test.
+Expected output: a status bar with a live uptime counter, green `[ OK ]` lines for each subsystem, then a prompt where you can type.
 
 ## Project layout
 
 ```
 boot/boot.asm         Multiboot header and entry point
 boot/gdt_flush.asm    Loads the GDT and reloads segment registers
-boot/isr_stubs.asm    CPU exception entry stubs (0-31) and idt_load
+boot/isr_stubs.asm    Entry stubs for CPU exceptions (0-31) and IRQs (32-47)
 kernel/kernel.c       kernel_main
-kernel/vga.c          VGA text-mode driver
+kernel/vga.c          VGA text-mode driver (status bar, cursor)
 kernel/gdt.c          Global Descriptor Table
 kernel/idt.c          Interrupt Descriptor Table
-kernel/isr.c          Exception handler
+kernel/isr.c          CPU exception handler
+kernel/pic.c          8259 PIC remap, mask and end-of-interrupt
+kernel/irq.c          Hardware interrupt dispatch
+kernel/timer.c        PIT timer (100 Hz) and uptime
+kernel/keyboard.c     PS/2 keyboard driver
 docs/                 Design notes, one per milestone
 linker.ld             Linker script (kernel loaded at 1 MiB)
 Makefile
