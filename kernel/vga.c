@@ -137,3 +137,18 @@ void vga_put_hex(uint32_t value) {
     for (int shift = 28; shift >= 0; shift -= 4)
         vga_putc(digits[(value >> shift) & 0xF]);
 }
+
+void vga_put_dec(uint32_t value) {
+    char buf[11];
+    int i = 0;
+    if (value == 0) {
+        vga_putc('0');
+        return;
+    }
+    while (value > 0) {
+        buf[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (i > 0)
+        vga_putc(buf[--i]);
+}

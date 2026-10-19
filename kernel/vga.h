@@ -27,6 +27,7 @@ void vga_set_color(enum vga_color fg, enum vga_color bg);
 void vga_putc(char c);
 void vga_puts(const char *s);
 void vga_put_hex(uint32_t value);
+void vga_put_dec(uint32_t value);
 void vga_set_status_left(const char *s);
 void vga_set_status_right(const char *s);
 

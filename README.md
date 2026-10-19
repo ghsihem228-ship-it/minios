@@ -9,7 +9,7 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] GDT and IDT, CPU exceptions ([notes](docs/02-gdt-idt.md))
 - [x] Hardware interrupts (PIC, timer) ([notes](docs/03-interrupts-keyboard.md))
 - [x] Keyboard driver
-- [ ] Physical memory manager (bitmap frame allocator)
+- [x] Physical memory manager (bitmap frame allocator) ([notes](docs/04-physical-memory.md))
 - [ ] Paging and a kernel heap (`kmalloc` / `kfree`)
 - [ ] Multitasking with a round-robin scheduler
 - [ ] System calls
@@ -54,6 +54,7 @@ kernel/pic.c          8259 PIC remap, mask and end-of-interrupt
 kernel/irq.c          Hardware interrupt dispatch
 kernel/timer.c        PIT timer (100 Hz) and uptime
 kernel/keyboard.c     PS/2 keyboard driver
+kernel/pmm.c          Physical memory manager (bitmap frame allocator)
 docs/                 Design notes, one per milestone
 linker.ld             Linker script (kernel loaded at 1 MiB)
 Makefile
