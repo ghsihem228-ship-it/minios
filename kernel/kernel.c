@@ -14,6 +14,11 @@
 #include "paging.h"
 #include "heap.h"
 #include "shell.h"
+#include "ramfs.h"
+#include "programs.h"
+#include "syscall.h"
+#include "task.h"
+#include "elf.h"
 
 #define MULTIBOOT_MAGIC 0x2BADB002
 
@@ -33,7 +38,7 @@ static void fail(const char *msg) {
 
 void kernel_main(uint32_t magic, uint32_t mb_info) {
     vga_clear();
-    vga_set_status_left("MiniOS v0.5");
+    vga_set_status_left("MiniOS v0.6");
 
     if (magic != MULTIBOOT_MAGIC) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
@@ -98,6 +103,15 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
     if (!heap_init()) fail("Heap initialisation");
     if (!heap_self_test()) fail("Heap self-test");
     ok("Heap self-test passed");
+
+    fs_init();
+    if (!programs_install() || !fs_self_test()) fail("RAMFS self-test");
+    ok("RAMFS self-test passed; ELF programs installed");
+    if (!elf_self_test()) fail("ELF loader self-test");
+    ok("ELF loader self-test passed");
+    syscall_install();
+    task_init();
+    ok("Ring 3 / TSS / int 0x80 / preemptive scheduler ready");
 
     /* Turn interrupts on: from now on the timer and keyboard can interrupt us. */
     __asm__ volatile ("sti");

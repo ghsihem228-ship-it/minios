@@ -3,7 +3,7 @@
  * The keyboard controller sends a scancode on port 0x60 for every key press
  * and release. The IRQ handler translates press codes to ASCII and stores
  * them in a ring buffer; keyboard_getchar() hands them to the rest of the
- * kernel (soon: the shell).
+ * kernel shell. Its idle path is a safe scheduling point for user tasks.
  */
 
 #include <stdint.h>
@@ -11,6 +11,7 @@
 #include "irq.h"
 #include "pic.h"
 #include "io.h"
+#include "task.h"
 
 #define KBD_DATA_PORT 0x60
 #define BUFFER_SIZE   256
@@ -83,8 +84,18 @@ void keyboard_init(void) {
     pic_unmask(1);
 }
 
+int keyboard_poll(void) {
+    uint32_t flags;
+    __asm__ volatile ("pushf; pop %0; cli" : "=r"(flags) :: "memory");
+    int c = -1;
+    if (head != tail) { c = (unsigned char)buffer[tail]; tail = (tail + 1) % BUFFER_SIZE; }
+    __asm__ volatile ("push %0; popf" :: "r"(flags) : "memory", "cc");
+    return c;
+}
+
 char keyboard_getchar(void) {
     for (;;) {
+        task_reap();
         __asm__ volatile ("cli");
         if (head != tail) {
             char c = buffer[tail];
@@ -94,6 +105,6 @@ char keyboard_getchar(void) {
         }
         /* "sti; hlt" is atomic enough: the CPU delays interrupts until after
          * the instruction following sti, so a key cannot slip in between. */
-        __asm__ volatile ("sti; hlt");
+        task_idle();
     }
 }

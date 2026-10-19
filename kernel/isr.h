@@ -16,6 +16,8 @@ struct regs {
 _Static_assert(sizeof(struct regs) == 14 * 4, "struct regs must match isr_common");
 
 void isr_install(void);
-void isr_handler(struct regs *r);
+/* Returns the frame to restore (possibly another task's kernel stack).
+ * Ring 3 entries also have user ESP/SS immediately after struct regs. */
+struct regs *isr_handler(struct regs *r);
 
 #endif

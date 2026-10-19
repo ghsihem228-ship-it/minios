@@ -6,6 +6,8 @@
 #include "pmm.h"
 #include "timer.h"
 #include "vga.h"
+#include "task.h"
+#include "ramfs.h"
 
 #define LINE_SIZE 128u
 #define SLOT_COUNT 16u
@@ -48,6 +50,10 @@ static void show_heap(void) {
     vga_puts(heap_validate() ? " integrity=OK\n" : " integrity=FAIL\n");
 }
 
+static void error(int code) {
+    vga_puts("Error errno="); vga_put_dec((uint32_t)-code); vga_putc('\n');
+}
+
 static void execute(char *line, uint32_t mb_info) {
     char *args[3];
     uint32_t count = 0;
@@ -61,20 +67,28 @@ static void execute(char *line, uint32_t mb_info) {
         if (*p) *p++ = 0;
     }
     if (!count) return;
-    int takes_arg = equal(args[0], "alloc") || equal(args[0], "free") ||
-        equal(args[0], "page");
-    if (count != (takes_arg ? 2u : 1u)) {
+    int takes_number = equal(args[0], "alloc") || equal(args[0], "free") ||
+        equal(args[0], "page") || equal(args[0], "kill");
+    int takes_path = equal(args[0], "run") || equal(args[0], "spawn") ||
+        equal(args[0], "cat") || equal(args[0], "rm");
+    uint32_t expected = equal(args[0], "write") ? 3u :
+        ((takes_number || takes_path) ? 2u : 1u);
+    if (count != expected) {
         vga_puts("Invalid arguments. Type help.\n"); return;
     }
     uint32_t value = 0;
-    if (takes_arg && !number(args[1], &value)) {
+    if (takes_number && !number(args[1], &value)) {
         vga_puts("Invalid number (decimal or 0x hex required).\n"); return;
     }
     if (equal(args[0], "help")) {
-        vga_puts("help clear uptime mem mmap heap test\n"
+        vga_puts("help clear uptime mem mmap heap trim test\n"
                  "alloc <bytes>  - allocate in one of 16 slots\n"
                  "free <id>      - release an occupied slot\n"
                  "page <addr>    - show virtual-to-physical mapping\n"
+                 "ls cat <path> write <path> <word> rm <path>\n"
+                 "run <path>     - run an ELF program; Esc cancels\n"
+                 "spawn <path>   - start a background ELF process\n"
+                 "ps kill <pid>  - process states / termination\n"
                  "fault          - deliberately read NULL; HALTS kernel\n");
     } else if (equal(args[0], "clear")) {
         vga_clear();
@@ -90,6 +104,45 @@ static void execute(char *line, uint32_t mb_info) {
         pmm_print_map(mb_info);
     } else if (equal(args[0], "heap")) {
         show_heap();
+    } else if (equal(args[0], "trim")) {
+        field("Released heap bytes=", heap_trim()); vga_putc('\n');
+    } else if (equal(args[0], "ls")) {
+        fs_list();
+    } else if (equal(args[0], "cat")) {
+        uint32_t len;
+        const uint8_t *data = fs_image(args[1], &len);
+        if (!data) { error(-2); return; }
+        if (len >= 4 && data[0] == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F') {
+            vga_puts("ELF binary; use run or spawn.\n"); return;
+        }
+        for (uint32_t i = 0; i < len; i++)
+            vga_putc(data[i] == '\n' || (data[i] >= 32 && data[i] <= 126) ? data[i] : '.');
+        if (!len || data[len - 1] != '\n') vga_putc('\n');
+    } else if (equal(args[0], "write")) {
+        struct file_handle f = {0};
+        int status = fs_open(&f, args[1], FS_WRITE | FS_CREATE | FS_TRUNC);
+        if (status) { error(status); return; }
+        uint32_t len = 0;
+        while (args[2][len]) len++;
+        status = fs_write(&f, args[2], len); fs_close(&f);
+        if (status < 0) error(status);
+        else { field("Wrote bytes=", status); vga_putc('\n'); }
+    } else if (equal(args[0], "rm")) {
+        int status = fs_unlink(args[1]);
+        if (status) error(status); else vga_puts("Removed file.\n");
+    } else if (equal(args[0], "run") || equal(args[0], "spawn")) {
+        int pid = task_spawn(args[1]);
+        if (pid < 0) { error(pid); return; }
+        field("Started PID ", pid); vga_putc('\n');
+        if (equal(args[0], "run")) {
+            int code = task_wait(pid);
+            field("[exit] pid=", pid); field(" status=", code); vga_putc('\n');
+        }
+    } else if (equal(args[0], "ps")) {
+        task_list();
+    } else if (equal(args[0], "kill")) {
+        int status = task_kill(value);
+        if (status) error(status); else { field("Killed PID ", value); vga_putc('\n'); }
     } else if (equal(args[0], "alloc")) {
         uint32_t id;
         for (id = 0; id < SLOT_COUNT && slots[id]; id++);

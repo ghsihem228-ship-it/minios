@@ -164,6 +164,27 @@ struct heap_stats heap_get_stats(void) {
     return s;
 }
 
+uint32_t heap_trim(void) {
+    struct block *last = first;
+    if (!last) return 0;
+    while (last->next) last = last->next;
+    if (last->magic != FREE_MAGIC) return 0;
+    uint32_t end = ((uint32_t)(last + 1) + ALIGN + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uint32_t keep = end - HEAP_BASE;
+    if (keep >= committed) return 0;
+    uint32_t released = committed - keep;
+    last->size -= released;
+    while (committed > keep) {
+        committed -= PAGE_SIZE;
+        uint32_t virt = HEAP_BASE + committed, frame;
+        if (paging_translate(virt, &frame)) {
+            paging_unmap_page(virt);
+            pmm_free_frame(frame);
+        }
+    }
+    return released;
+}
+
 int heap_self_test(void) {
     if (!heap_validate() || heap_get_stats().used)
         return 0;
@@ -203,7 +224,9 @@ int heap_self_test(void) {
     }
     while (n) kfree(chunks[--n]);
     struct heap_stats s = heap_get_stats();
-    return ok && heap_validate() && !s.used && s.blocks == 1 &&
+    int passed = ok && heap_validate() && !s.used && s.blocks == 1 &&
         frames_before - pmm_free_frames() == (committed - bytes_before) / PAGE_SIZE &&
         s.free + sizeof(struct block) == s.committed;
+    heap_trim(); /* do not strand almost all RAM in boot-only stress tests */
+    return passed && heap_validate();
 }

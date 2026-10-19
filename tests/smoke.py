@@ -102,7 +102,8 @@ class Guest:
             time.sleep(0.05)
 
     def type(self, text):
-        codes = {" ": "spc", "\n": "ret", "\b": "backspace", "\t": "tab"}
+        codes = {" ": "spc", "\n": "ret", "\b": "backspace", "\t": "tab", "\x1b": "esc",
+                 "/": "slash", ".": "dot", "-": "minus", "=": "equal"}
         for char in text:
             code = codes.get(char, char)
             self.qmp("send-key", keys=[{"type": "qcode", "data": code}], **{"hold-time": 10})
@@ -118,11 +119,91 @@ class Guest:
         return screen
 
 
+def process_checks(guest, full):
+    def free_frames():
+        screen = guest.command("mem", "Paging: ON")
+        return int(re.search(r"PMM: total=\d+ free=(\d+)", screen).group(1))
+
+    def run_program(path, marker, status=0):
+        screen = guest.command("run " + path, "[exit]")
+        assert marker in screen and f"status={status}\n" in screen, screen
+        return screen
+
+    def spawn(path):
+        screen = guest.command("spawn " + path, "Started PID")
+        return int(re.search(r"Started PID (\d+)", screen).group(1))
+
+    def ps():
+        screen = guest.command("ps", "PID STATE")
+        rows = re.findall(r"^(\d+) (ready|running|sleep|zombie) (\d+) (\d+) (\d+|-) (\S+)$",
+                          screen, re.MULTILINE)
+        return {int(row[0]): row[1:] for row in rows}
+
+    guest.command("trim", "Released heap bytes=")
+    before = free_frames()
+    guest.command("run /etc/motd", "Error errno=8")
+    guest.command("run /missing", "Error errno=2")
+    run_program("/bin/hello", "Hello from Ring 3!")
+    run_program("/bin/probe", "[user] syscall validation passed")
+    run_program("/bin/filedemo", "[user] filesystem roundtrip passed")
+    guest.command("cat /tmp/user.txt", "Written by a Ring 3 program.")
+    # This would fail EBUSY if process exit did not close its descriptor.
+    guest.command("rm /tmp/user.txt", "Removed file.")
+    run_program("/bin/sleep", "[user] sleep/wakeup passed")
+    screen = run_program("/bin/crash", "user cr2=0x00100000", status=142)
+    assert "vector=14 err=0x00000005" in screen, screen
+    screen = run_program("/bin/readonly", "user cr2=0x40000000", status=142)
+    assert "vector=14 err=0x00000007" in screen, screen
+    screen = run_program("/bin/guard", "user cr2=0x403FBFFC", status=142)
+    assert "vector=14 err=0x00000004" in screen, screen
+    run_program("/bin/io", "vector=13", status=141)
+    guest.command("write /tmp/note hello", "Wrote bytes=5")
+    guest.command("cat /tmp/note", "\nhello\n")
+    guest.command("rm /tmp/note", "Removed file.")
+    guest.command("write /etc/motd x", "Error errno=30")
+    assert free_frames() == before, "Leaked process frames after exit/fault/failed load"
+    if full:
+        spins = [spawn("/bin/spin"), spawn("/bin/spin")]
+        first = ps()
+        time.sleep(0.2)
+        later = ps()
+        for pid in spins:
+            assert int(later[pid][1]) > int(first[pid][1]), (first, later)
+            assert int(later[pid][2]) > int(first[pid][2]), (first, later)
+        # Two programs touch the same virtual .bss address using distinct PID
+        # sentinels. If private frames or CR3 switching break, one exits 1.
+        isolates = [spawn("/bin/isolate"), spawn("/bin/isolate")]
+        deadline = time.monotonic() + 15
+        while True:
+            rows = ps()
+            if all(rows[pid][0] == "zombie" for pid in isolates): break
+            assert time.monotonic() < deadline, rows
+        assert all(rows[pid][3] == "0" for pid in isolates), rows
+        run_program("/bin/probe", "[user] syscall validation passed")
+        for _ in range(5): spins.append(spawn("/bin/spin"))
+        guest.command("spawn /bin/hello", "Error errno=11")
+        assert before - free_frames() == 6 * 7, "Unexpected frame ownership"
+        guest.command("kill 0", "Error errno=1")
+        for pid in spins:
+            guest.command(f"kill {pid}", f"Killed PID {pid}")
+        assert free_frames() == before, "Kill/reap leaked frames"
+        for _ in range(8): run_program("/bin/hello", "Hello from Ring 3!")
+        assert free_frames() == before, "Slot reuse leaked frames"
+        guest.type("clear\nrun /bin/spin\n")
+        guest.wait_for("Started PID")
+        guest.type("\x1b")
+        screen = guest.wait_for("[exit]")
+        assert "status=137" in screen, screen
+        assert free_frames() == before, "Cancellation leaked frames"
+
+
 def run(qemu, ram, full):
     with Guest(qemu, ram) as guest:
         boot = guest.screen()
         for text in ("Frame allocator self-test passed", "Paging self-test passed",
-                     "Heap self-test passed", f"RAM: {ram - 1} MiB usable"):
+                     "Heap self-test passed", "RAMFS self-test passed",
+                     "ELF loader self-test passed", "preemptive scheduler ready",
+                     f"RAM: {ram - 1} MiB usable"):
             assert text in boot, boot
         guest.command("mem", "Paging: ON; NULL unmapped")
         stats = guest.command("heap", "integrity=OK")
@@ -175,13 +256,14 @@ def run(qemu, ram, full):
         time.sleep(0.1)
         tick2 = guest.command("uptime", "Uptime ticks")
         assert int(re.search(r"100 Hz\): (\d+)", tick2).group(1)) > first, tick2
+        process_checks(guest, full)
         # Verify real hardware protection and diagnostic handling, last
         # because this deliberate fatal exception halts the guest.
         guest.type("clear\nfault\n")
         fault = guest.wait_for("System halted.")
         assert "Page fault" in fault and "cr2=0x00000000 not-present read supervisor" in fault, fault
-        print(f"PASS {ram} MiB: boot, PMM, paging, heap, shell, timer, NULL fault" +
-              (", slot/fragmentation/capacity/input checks" if full else ""), flush=True)
+        print(f"PASS {ram} MiB: memory, ELF, Ring 3, syscalls, RAMFS, process fault isolation, timer, NULL fault" +
+              (", preemption/address-space isolation/limits/reaping/input checks" if full else ""), flush=True)
 
 
 def main():

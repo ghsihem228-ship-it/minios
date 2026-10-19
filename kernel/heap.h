@@ -16,7 +16,8 @@ void *kmalloc(size_t size);
 void kfree(void *ptr);
 struct heap_stats heap_get_stats(void);
 int heap_validate(void);
-/* Run only with no outstanding allocations. Grows the retained heap. */
+uint32_t heap_trim(void); /* return fully free trailing pages to the PMM */
+/* Run only with no outstanding allocations; trims stress-test pages on exit. */
 int heap_self_test(void);
 
 #endif

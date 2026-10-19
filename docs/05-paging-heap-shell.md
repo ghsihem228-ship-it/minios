@@ -1,5 +1,8 @@
 # Paging, kernel heap and memory shell (v0.5)
 
+Historical milestone: v0.6 adds process address spaces and explicit heap trim;
+see [the newer design](06-processes-userspace-ramfs.md) for current behavior.
+
 This extends v0.4's Multiboot memory map and physical frame allocator. The
 kernel now enables paging, allocates variable-sized objects and exposes an
 interactive shell. The PMM still owns physical frame accounting.

@@ -91,6 +91,12 @@ IRQ 13, 45
 IRQ 14, 46
 IRQ 15, 47
 
+global syscall_entry
+syscall_entry:
+    push dword 0
+    push dword 128
+    jmp isr_common
+
 isr_common:
     pusha                   ; push eax, ecx, edx, ebx, esp, ebp, esi, edi
     mov ax, ds
@@ -105,7 +111,7 @@ isr_common:
     cld                     ; C code expects the direction flag cleared
     push esp                ; argument: pointer to struct regs
     call isr_handler
-    add esp, 4
+    mov esp, eax            ; handler may select another task's saved frame
 
     pop eax                 ; restore the data segment
     mov ds, ax

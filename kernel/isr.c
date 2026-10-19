@@ -5,6 +5,8 @@
 #include "gdt.h"
 #include "vga.h"
 #include "irq.h"
+#include "task.h"
+#include "syscall.h"
 
 extern void isr0(void);  extern void isr1(void);  extern void isr2(void);
 extern void isr3(void);  extern void isr4(void);  extern void isr5(void);
@@ -62,12 +64,14 @@ void isr_install(void) {
     }
 }
 
-void isr_handler(struct regs *r) {
+struct regs *isr_handler(struct regs *r) {
     /* Vectors 32-47 are hardware interrupts (IRQ 0-15), not CPU exceptions. */
     if (r->int_no >= 32 && r->int_no < 48) {
         irq_dispatch(r);
-        return;
+        return r->int_no == 32 ? task_tick(r) : r;
     }
+    if (r->int_no == 128) return syscall_dispatch(r);
+    if ((r->cs & 3) == 3) return task_fault(r);
 
     /* The breakpoint exception is harmless: report it and keep running.
      * It lets us test that the whole IDT path works. */
@@ -77,7 +81,7 @@ void isr_handler(struct regs *r) {
         vga_put_hex(r->eip);
         vga_puts("]\n");
         vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-        return;
+        return r;
     }
 
     /* Any other exception is fatal for now: print details and halt. */
