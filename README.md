@@ -10,11 +10,12 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] Hardware interrupts (PIC, timer) ([notes](docs/03-interrupts-keyboard.md))
 - [x] Keyboard driver
 - [x] Physical memory manager (bitmap frame allocator) ([notes](docs/04-physical-memory.md))
-- [ ] Paging and a kernel heap (`kmalloc` / `kfree`)
+- [x] Paging and a kernel heap (`kmalloc` / `kfree`) ([notes](docs/05-paging-heap-shell.md))
+- [x] Interactive memory shell (`help`, `mem`, `mmap`, `alloc`, `free`, `heap`, `page`, `test`, `uptime`, `clear`)
 - [ ] Multitasking with a round-robin scheduler
 - [ ] System calls
 - [ ] In-memory filesystem (RAM disk)
-- [ ] Interactive shell (`help`, `ls`, `cat`, `mem`, `ps`, `clear`)
+- [ ] Filesystem and process shell commands (`ls`, `cat`, `ps`)
 
 ## Requirements
 
@@ -22,6 +23,7 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - `nasm`
 - `ld` (binutils)
 - `qemu-system-i386`
+- Python 3 (for the automated QEMU tests only)
 
 On Debian/Ubuntu:
 
@@ -34,10 +36,38 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86
 ```bash
 make        # builds build/minios.bin
 make run    # boots the kernel in QEMU
+make test   # headless functional tests (Python 3 + QEMU TCG, no GUI or KVM)
 make clean
 ```
 
-Expected output: a status bar with a live uptime counter, green `[ OK ]` lines for each subsystem, then a prompt where you can type.
+Expected output: MiniOS v0.5, a live uptime counter, green `[ OK ]` lines
+including frame allocator, paging and heap self-tests, then `minios>`.
+Try `help`, `mem`, `alloc 9001`, `heap`, `free 0`, then `test`.
+Numbers accept decimal and `0x` hexadecimal; allocations use 16 numbered slots.
+`fault` deliberately reads the unmapped NULL page and halts with a diagnostic;
+restart QEMU afterwards. The other commands return to the prompt.
+
+The heap grows to about 4 MiB, retains its backing pages after `kfree`, and
+coalesces adjacent free blocks. Boot self-tests exercise growth/exhaustion, so
+the initial committed heap is larger than one page. This is a single CPU,
+kernel-only milestone: no processes, filesystem, user mode or demand paging.
+
+For cloud shells with the prepared local tools:
+
+```bash
+export PATH=/workspace/.minios-tools/bin:$PATH
+make test
+```
+
+`make run` needs a graphical display. `make test` inspects VGA memory via QMP,
+types commands through the PS/2 keyboard, and checks actual guest behavior.
+It boots with 2, 64 and 128 MiB, and ends each guest with a deliberate page
+fault to verify CR2/error reporting. A PASS line is required for each RAM size.
+To select another QEMU binary or RAM sizes:
+
+```bash
+python3 tests/smoke.py --qemu qemu-system-i386 --ram 2 64 128
+```
 
 ## Project layout
 
@@ -55,6 +85,10 @@ kernel/irq.c          Hardware interrupt dispatch
 kernel/timer.c        PIT timer (100 Hz) and uptime
 kernel/keyboard.c     PS/2 keyboard driver
 kernel/pmm.c          Physical memory manager (bitmap frame allocator)
+kernel/paging.c       Page directory, identity map, heap mappings, TLB invalidation
+kernel/heap.c         Growable first-fit allocator, split/coalesce, integrity tests
+kernel/shell.c        Bounded input, memory commands and allocation slots
+tests/smoke.py        Headless QEMU functional tests
 docs/                 Design notes, one per milestone
 linker.ld             Linker script (kernel loaded at 1 MiB)
 Makefile

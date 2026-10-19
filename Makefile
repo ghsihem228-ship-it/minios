@@ -6,7 +6,8 @@ LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
 OBJS = build/boot.o build/gdt_flush.o build/isr_stubs.o \
        build/kernel.o build/vga.o build/gdt.o build/idt.o build/isr.o \
-       build/pic.o build/irq.o build/timer.o build/keyboard.o build/pmm.o
+       build/pic.o build/irq.o build/timer.o build/keyboard.o build/pmm.o \
+       build/paging.o build/heap.o build/shell.o
 
 all: build/minios.bin
 
@@ -24,7 +25,10 @@ build/minios.bin: $(OBJS) linker.ld
 run: build/minios.bin
 	qemu-system-i386 -kernel build/minios.bin
 
+test: build/minios.bin
+	python3 tests/smoke.py
+
 clean:
 	rm -rf build
 
-.PHONY: all run clean
+.PHONY: all run test clean

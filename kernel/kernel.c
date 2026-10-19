@@ -1,4 +1,4 @@
-/* kernel.c - MiniOS entry point (milestone 4: physical memory manager) */
+/* kernel.c - MiniOS entry point: memory management and interactive shell */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -11,6 +11,9 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "pmm.h"
+#include "paging.h"
+#include "heap.h"
+#include "shell.h"
 
 #define MULTIBOOT_MAGIC 0x2BADB002
 
@@ -22,9 +25,15 @@ static void ok(const char *msg) {
     vga_puts("\n");
 }
 
+static void fail(const char *msg) {
+    vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
+    vga_puts("[FAIL] "); vga_puts(msg); vga_puts("\nSystem halted.\n");
+    for (;;) __asm__ volatile ("cli; hlt");
+}
+
 void kernel_main(uint32_t magic, uint32_t mb_info) {
     vga_clear();
-    vga_set_status_left("MiniOS v0.4");
+    vga_set_status_left("MiniOS v0.5");
 
     if (magic != MULTIBOOT_MAGIC) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
@@ -77,30 +86,21 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
     if (a && b && a != b && c == a && pmm_free_frames() == before) {
         ok("Frame allocator self-test passed");
     } else {
-        vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-        vga_puts("[FAIL] Frame allocator self-test\n");
-        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        fail("Frame allocator self-test");
     }
     pmm_free_frame(b);
     pmm_free_frame(c);
 
+    if (!paging_init()) fail("Paging initialisation");
+    ok("Paging enabled; NULL page unmapped");
+    if (!paging_self_test()) fail("Paging self-test");
+    ok("Paging self-test passed");
+    if (!heap_init()) fail("Heap initialisation");
+    if (!heap_self_test()) fail("Heap self-test");
+    ok("Heap self-test passed");
+
     /* Turn interrupts on: from now on the timer and keyboard can interrupt us. */
     __asm__ volatile ("sti");
 
-    /* Try a fatal exception: uncomment the next lines, rebuild, and the
-     * kernel will print "Divide by zero" and halt.
-     *
-     *   volatile int zero = 0;
-     *   volatile int boom = 1 / zero;
-     *   (void)boom;
-     */
-
-    vga_puts("\nInterrupts are on. Type something (Backspace and Shift work):\n> ");
-
-    for (;;) {
-        char c = keyboard_getchar();
-        vga_putc(c);
-        if (c == '\n')
-            vga_puts("> ");
-    }
+    shell_run(mb_info);
 }

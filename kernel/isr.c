@@ -90,6 +90,16 @@ void isr_handler(struct regs *r) {
     vga_put_hex(r->err_code);
     vga_puts(" eip=");
     vga_put_hex(r->eip);
+    if (r->int_no == 14) {
+        uint32_t cr2;
+        __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
+        vga_puts("\ncr2="); vga_put_hex(cr2);
+        vga_puts(r->err_code & 1 ? " protection" : " not-present");
+        vga_puts(r->err_code & 2 ? " write" : " read");
+        vga_puts(r->err_code & 4 ? " user" : " supervisor");
+        if (r->err_code & 8) vga_puts(" reserved-bit");
+        if (r->err_code & 16) vga_puts(" instruction-fetch");
+    }
     vga_puts("\nSystem halted.\n");
 
     for (;;)
