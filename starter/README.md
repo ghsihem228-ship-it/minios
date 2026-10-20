@@ -1,3 +1,23 @@
+# Step 6: syscall ABI and kernel-invoked entry path
+
+Read [the step-6 design, ABI, implementation guide, tests and limits](docs/06-syscalls.md).
+Three scalar calls provide ABI negotiation and local handle close/duplicate.
+INT 0x80 uses the existing saved-frame path. **The gate stays DPL0** until the
+later userspace milestone provides a safe ring-3 transition. This is not yet a
+userspace-callable syscall service.
+
+```bash
+make
+make test-syscalls
+make test
+make run
+```
+
+Normal boot additionally prints `PASS syscalls: INT80, registers, ABI, handles, rejection`.
+Earlier milestone material below describes its respective subsystem.
+
+---
+
 # Step 5: kernel handle/object manager
 
 Read [the step-5 design, specification, working-code guide and tests](docs/05-handles.md).

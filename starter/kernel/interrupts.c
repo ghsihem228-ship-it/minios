@@ -1,4 +1,5 @@
 #include "interrupts.h"
+#include "syscall.h"
 #include "io.h"
 #include "serial.h"
 #include <stddef.h>
@@ -153,6 +154,7 @@ void interrupts_init(void) {
     out8(0x21, 0xfe);          /* Unmask only IRQ0; slave stays fully masked. */
 }
 void interrupt_dispatch(struct interrupt_frame *f) {
+    if (f->vector == 128) { syscall_dispatch(f); return; }
     if (f->vector == 3 && f->rip == (uintptr_t)probe_breakpoint_resume) {
         uint64_t live_flags;
         __asm__ volatile ("pushfq; pop %0" : "=r"(live_flags));

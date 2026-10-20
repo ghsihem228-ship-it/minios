@@ -2,6 +2,7 @@
 #include "interrupts.h"
 #include "vmm.h"
 #include "scheduler.h"
+#include "syscall.h"
 _Static_assert(sizeof(void *) == 8, "This starter requires x86_64");
 #ifndef TEST_FAULT
 #define TEST_FAULT 0
@@ -50,6 +51,11 @@ void kernel_main(uint32_t boot_info) {
         for (;;) __asm__ volatile ("cli; hlt");
     }
     (void)serial_write("PASS handles: types, references, stale tokens, capacity, retirement\n");
+    if (!syscall_selftest()) {
+        (void)serial_write("ERROR: syscall self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS syscalls: INT80, registers, ABI, handles, rejection\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
     /* Bootstrap is the idle task. IRQ handlers never invoke the scheduler. */
     for (;;) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); }
