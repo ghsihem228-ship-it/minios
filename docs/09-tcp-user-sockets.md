@@ -1,5 +1,8 @@
 # v0.9: user-space UDP/TCP and HTTP
 
+Historical milestone: v0.10 rewrites the HTTP demo in C and adds configurable
+arguments; see [the C runtime and startup ABI](10-c-runtime-arguments.md).
+
 The network stack now serves Ring 3 programs. A process can create a socket,
 start a TCP connection, queue a bounded send, read a byte stream/datagram,
 inspect readiness, and close its own descriptor. `/bin/http` demonstrates the

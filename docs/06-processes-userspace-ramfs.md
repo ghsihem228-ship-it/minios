@@ -79,7 +79,9 @@ zeroed, which supplies BSS and clears stale data. File data is copied through
 the kernel scratch mapping even for read-only user text. The stack is then
 mapped. Any allocation/copy failure releases all new user frames.
 
-Programs have no argc/argv/environment or user heap API yet. Build the NASM
+v0.10 adds argc/argv and a freestanding C library; see
+[the startup/runtime ABI](10-c-runtime-arguments.md). Environment variables and
+a user heap API remain unimplemented. Build the NASM
 examples with `user/linker.ld` and `user/abi.inc`; Make embeds their ELF images
 in `.rodata` and installs them as read-only RAMFS files. Adding a new example
 requires listing it in Makefile, `boot/programs_blob.asm`, and

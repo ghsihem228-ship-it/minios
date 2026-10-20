@@ -108,10 +108,14 @@ class Guest:
     def type(self, text):
         codes = {" ": "spc", "\n": "ret", "\b": "backspace", "\t": "tab", "\x1b": "esc",
                  "/": "slash", ".": "dot", "-": "minus", "=": "equal"}
+        shifted = {'"': 'apostrophe', '?': 'slash', ':': 'semicolon', '!': '1',
+                   '_': 'minus', '&': '7', '(': '9', ')': '0'}
+        codes.update({"'": "apostrophe", "\\": "backslash", ",": "comma", ";": "semicolon"})
         for char in text:
-            code = codes.get(char, char.lower())
+            code = shifted.get(char, codes.get(char, char.lower()))
             keys = [{"type": "qcode", "data": code}]
-            if 'A' <= char <= 'Z': keys.insert(0, {"type": "qcode", "data": "shift"})
+            if 'A' <= char <= 'Z' or char in shifted:
+                keys.insert(0, {"type": "qcode", "data": "shift"})
             self.qmp("send-key", keys=keys, **{"hold-time": 10})
             time.sleep(0.025)
 
@@ -243,7 +247,7 @@ def run(qemu, ram, full):
             guest.command("\tmem\t", "Paging: ON")
             guest.command("alloc nope", "Invalid number")
             guest.command("alloc 1 2", "Invalid arguments")
-            guest.command("x" * 140, "Line too long; command discarded.")
+            guest.command("x" * 270, "Line too long; command discarded.")
             guest.command("unknown", "Unknown command.")
             guest.command("mmap", "usable")
             guest.command("page 0xd03fe000", "-> unmapped")

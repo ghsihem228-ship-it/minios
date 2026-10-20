@@ -11,12 +11,19 @@ OBJS = build/boot.o build/gdt_flush.o build/isr_stubs.o \
        build/ramfs.o build/syscall.o build/programs.o build/programs_blob.o \
        build/vfs.o build/block.o build/fat32.o \
        build/pci.o build/rtl8139.o build/net_wire.o build/net.o \
-       build/tcp_wire.o build/socket.o
+       build/tcp_wire.o build/socket.o build/command.o build/startup.o
 
 DISK_IMAGE ?= disks/minios.img
 NET_FILES ?= netfiles
 
-USER_PROGRAMS = hello probe filedemo sleep spin crash readonly isolate guard io diskdemo http udpecho sockprobe sockhold
+USER_ASM_PROGRAMS = hello probe filedemo sleep spin crash readonly isolate guard io diskdemo udpecho sockprobe sockhold
+USER_C_PROGRAMS = http args ctest
+USER_PROGRAMS = $(USER_ASM_PROGRAMS) $(USER_C_PROGRAMS)
+USER_CFLAGS = -m32 -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
+              -msoft-float -mno-sse -mno-sse2 -mno-mmx -fno-asynchronous-unwind-tables \
+              -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror -Iuser/include
+USER_C_ELFS = $(addprefix build/user/,$(addsuffix .elf,$(USER_C_PROGRAMS)))
+USER_LIB_OBJS = build/user/lib/syscalls.o build/user/lib/string.o build/user/lib/format.o
 USER_ELFS = $(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS)))
 
 all: build/minios.bin
@@ -27,6 +34,20 @@ build/user/%.o: user/%.asm user/abi.inc
 
 build/user/%.elf: build/user/%.o user/linker.ld
 	$(LD) -m elf_i386 -T user/linker.ld -nostdlib -o $@ $<
+
+build/user/%.c.o: user/%.c user/include/minios.h
+	@mkdir -p build/user
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+build/user/lib/%.o: user/lib/%.c user/include/minios.h
+	@mkdir -p build/user/lib
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+build/user/libmini.a: $(USER_LIB_OBJS)
+	$(AR) rcs $@ $^
+
+$(USER_C_ELFS): build/user/%.elf: build/user/%.c.o build/user/crt0.o build/user/libmini.a user/linker.ld
+	$(LD) -m elf_i386 -T user/linker.ld -nostdlib --gc-sections -o $@ build/user/crt0.o $< build/user/libmini.a
 
 build/programs_blob.o: boot/programs_blob.asm $(USER_ELFS)
 	$(AS) -f elf32 $< -o $@
@@ -52,11 +73,12 @@ run: build/minios.bin disk netfiles
 	qemu-system-i386 -kernel build/minios.bin -drive file="$(DISK_IMAGE)",format=raw,if=ide,index=0 \
 	    -netdev user,id=net0,tftp="$(NET_FILES)" -device rtl8139,netdev=net0
 
-test: build/minios.bin test-wire
+test: build/minios.bin test-wire test-startup
 	python3 tests/smoke.py
 	python3 tests/storage.py
 	python3 tests/network.py
 	python3 tests/sockets.py
+	python3 tests/runtime.py
 
 test-storage: build/minios.bin
 	python3 tests/storage.py
@@ -74,7 +96,15 @@ test-wire: kernel/net_wire.c kernel/net_wire.h tests/net_wire_test.c
 	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Ikernel tests/socket_wire_test.c kernel/tcp_wire.c kernel/net_wire.c -o build/socket-wire-test
 	./build/socket-wire-test
 
+test-runtime: build/minios.bin test-startup
+	python3 tests/runtime.py
+
+test-startup:
+	@mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Ikernel tests/startup_test.c kernel/command.c kernel/startup.c -o build/startup-test
+	./build/startup-test
+
 clean:
 	rm -rf build
 
-.PHONY: all run disk netfiles test test-storage test-network test-sockets test-wire clean
+.PHONY: all run disk netfiles test test-storage test-network test-sockets test-wire test-startup test-runtime clean

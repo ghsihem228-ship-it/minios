@@ -90,7 +90,14 @@ void task_reap(void) {
 }
 
 int task_spawn(const char *path) {
+    return task_spawn_args(1, &path);
+}
+int task_spawn_args(unsigned argc, const char *const *argv) {
     if (!ready || current || next_pid > 0x7FFFFFFFu) return -11;
+    struct startup_stack initial;
+    int packed = startup_build(argc, argv, USER_TOP, USER_STACK_BOTTOM, &initial);
+    if (packed) return packed;
+    const char *path = argv[0];
     task_reap();
     uint32_t len;
     uint8_t *image;
@@ -104,6 +111,9 @@ int task_spawn(const char *path) {
     int error = elf_load(i - 1, image, len, &entry);
     kfree(image); heap_trim();
     if (error) return error;
+    if (!paging_space_write(i - 1, initial.sp, initial.bytes, initial.used)) {
+        paging_space_destroy(i - 1); return -12;
+    }
     struct task *t = &tasks[i];
     for (unsigned j = 0; j < sizeof(*t); j++) ((uint8_t *)t)[j] = 0;
     unsigned j = 0;
@@ -115,7 +125,7 @@ int task_spawn(const char *path) {
     for (j = 0; j < sizeof(*frame); j++) ((uint8_t *)frame)[j] = 0;
     frame->r.ds = GDT_USER_DATA; frame->r.cs = GDT_USER_CODE;
     frame->r.eip = entry; frame->r.eflags = 0x202;
-    frame->esp = USER_TOP - 16; frame->ss = GDT_USER_DATA;
+    frame->esp = initial.sp; frame->ss = GDT_USER_DATA;
     t->context = &frame->r;
     t->state = READY;
     return t->pid;

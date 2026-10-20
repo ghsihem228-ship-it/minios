@@ -23,11 +23,14 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] IPv4, ARP, DHCP, ICMP echo, DNS lookup/cache and TFTP downloads to disk
 - [x] Process-owned nonblocking UDP/TCP sockets and checked network syscalls
 - [x] Ring 3 HTTP client, bounded TCP retransmission/flow control and socket cleanup
+- [x] Private `argc/argv` startup stacks and quoted shell arguments
+- [x] Freestanding C runtime/library and a configurable C HTTP program
 
 See [the v0.6 design and syscall ABI](docs/06-processes-userspace-ramfs.md).
 Persistent storage and its limits are documented in [v0.7 storage notes](docs/07-vfs-ata-fat32.md).
 Networking and its limits are documented in [v0.8 networking notes](docs/08-networking.md).
 The socket ABI and TCP limits are documented in [v0.9 socket notes](docs/09-tcp-user-sockets.md).
+C programs and the startup ABI are documented in [v0.10 runtime notes](docs/10-c-runtime-arguments.md).
 
 ## Requirements
 
@@ -53,10 +56,11 @@ make test   # headless functional tests (Python 3 + QEMU TCG, no GUI or KVM)
 make test-storage # only persistence/failure tests
 make test-network # v0.8 network integration and sanitized packet decoder tests
 make test-sockets # Ring 3 TCP/UDP, HTTP interoperability and TCP fault tests
+make test-runtime # C startup/library, quoted arguments, disk ELF and variable HTTP
 make clean
 ```
 
-Expected output: MiniOS v0.9, a live uptime counter, green `[ OK ]` lines
+Expected output: MiniOS v0.10, a live uptime counter, green `[ OK ]` lines
 including memory, RAMFS and ELF loader self-tests, then `minios>`.
 Try `help`, `mem`, `alloc 9001`, `heap`, `free 0`, then `test`.
 Numbers accept decimal and `0x` hexadecimal; allocations use 16 numbered slots.
@@ -230,12 +234,13 @@ run /bin/http
 sockets
 ```
 
-`/bin/http` connects to the host through QEMU's `10.0.2.2:8080`, sends an HTTP/1.0
+`/bin/http` defaults to the host through QEMU's `10.0.2.2:8080`, sends an HTTP/1.0
 request for `/welcome.txt`, prints the response and its byte count/FNV-1a digest,
 and exits after EOF. Expect `Hello from the MiniOS network!` followed by
 `[user] HTTP download complete` and status 0. It has a ten-second application
-wait limit. This is a fixed demonstration endpoint, not a browser, HTTPS client,
-or general HTTP parser. No public Internet is needed. Stop the host server with
+wait limit and a 1 MiB response cap. v0.10 accepts a numeric server address,
+port and path as arguments; it remains a raw HTTP/1.0 demonstration rather than
+a browser, HTTPS client or general HTTP parser. No public Internet is needed. Stop the host server with
 Ctrl+C when done. Socket tests start their own temporary listeners on ports
 8080/9000; stop your demo server before running them.
 
@@ -252,6 +257,52 @@ TCP supports active opens with one segment in flight (maximum 512 bytes),
 bounded retries and zero-window probes. There is no listen/accept, socket FD
 integration with file descriptors, TCP congestion-control algorithm, TLS, IPv6,
 or general POSIX socket compatibility. See the design note for exact semantics.
+
+## C programs and arguments (v0.10)
+
+The host GCC now builds freestanding i386 C programs against `user/include/minios.h`
+and `build/user/libmini.a`. Programs still run in isolated Ring 3 address spaces.
+The library provides integer `printf`/`snprintf`, string/memory helpers, strict
+integer/IPv4 parsing and wrappers for the existing file, socket and process
+syscalls. There is no host libc dependency in the guest binary, guest compiler,
+`malloc`, floating-point support or full standard C/POSIX library.
+
+After `make run`, try:
+
+```text
+run /bin/args hello world
+run /bin/args "hello world" ""
+run /bin/ctest
+```
+
+`run` and `spawn` pass up to eight arguments **including the executable path**,
+each at most 63 bytes. Each process receives its own writable argument strings
+and pointers on a 16-byte-aligned initial stack. Shell lines allow 255 bytes;
+single/double quotes and backslash escapes are supported. Unterminated quotes,
+trailing escapes, excess arguments and long argument strings are rejected.
+Quoted text also works for commands such as `write /tmp/note "hello world"`.
+
+The HTTP client is now written in C. With the same Python server from the
+previous section running in a second host terminal:
+
+```text
+dhcp
+run /bin/http 10.0.2.2 8080 /welcome.txt
+run /bin/http --help
+sockets
+```
+
+The no-argument HTTP command retains its old defaults. Numeric IPv4 addresses,
+ports 1–65535, absolute request paths and query strings are supported. The
+program prints raw HTTP headers/body and its byte count/hash; it does not parse
+status codes, redirects or chunked framing. Use TFTP `fetch` for the existing
+bounded download-to-file workflow.
+
+`make test-runtime` runs a sanitized command/stack packer harness with 100,000
+cases, then actual C programs under QEMU at 2/64 MiB. It checks startup alignment,
+private argv lifetime, formatting/truncation, strings, checked file/socket calls,
+HTTP on a variable host port/path and C ELF execution from disk after reboot.
+See the design note for the startup layout and how to add a program.
 
 ## Project layout
 
@@ -273,7 +324,9 @@ kernel/pmm.c          Physical memory manager (bitmap frame allocator)
 kernel/paging.c       Page directory, identity map, heap mappings, TLB invalidation
 kernel/heap.c         Growable first-fit allocator, split/coalesce, integrity tests
 kernel/shell.c        Bounded input, memory commands and allocation slots
-kernel/task.c         Process table, preemption, sleep/wakeup, exit/kill/reaping
+kernel/task.c         Process table, argv stack setup, preemption and reaping
+kernel/command.c      Bounded quote/escape-aware shell tokenizer
+kernel/startup.c      Pure bounded i386 argc/argv stack packer
 kernel/elf.c          Validated ELF32 loader and rollback tests
 kernel/syscall.c      Ring 3 ABI, user pointer checks and descriptor operations
 kernel/ramfs.c        Bounded RAM filesystem (read-only built-ins + mutable files)
@@ -287,13 +340,17 @@ kernel/net_wire.c     Bounded wire codecs shared with sanitizer tests
 kernel/tcp_wire.c     TCP header/options/checksum validation
 kernel/socket.c       Process-owned UDP/TCP queues, state machine and timers
 kernel/programs.c     Installs embedded /bin programs into RAMFS
-user/                Freestanding NASM programs, syscall macros and linker script
+user/                Freestanding NASM/C programs, CRT entry and linker script
+user/include/minios.h Small C API for formatting, files, sockets and syscalls
+user/lib/             Static integer-only runtime, strings and syscall wrappers
 tests/smoke.py        Headless QEMU functional tests
 tests/storage.py      Persistence, host FAT inspection and fault-injection tests
 tests/network.py      Real QEMU network and deterministic Ethernet fault fixture
 tests/net_wire_test.c Sanitized DNS/DHCP checks and fuzzing
 tests/socket_wire_test.c Sanitized TCP packet decoder checks and fuzzing
 tests/sockets.py      Real host TCP/UDP, Ring 3 HTTP and fault-injecting TCP peer
+tests/startup_test.c  Sanitized tokenizer/startup-stack bounds and fuzz cases
+tests/runtime.py     Actual C runtime/argv, file/socket calls and variable HTTP
 tools/netfiles.py     Preserve/create local TFTP example files
 tools/mkdisk.py       Exclusive-create FAT32 image formatter; preserves existing files
 docs/                 Design notes, one per milestone

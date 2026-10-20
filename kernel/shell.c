@@ -11,8 +11,9 @@
 #include "net.h"
 #include "pci.h"
 #include "socket.h"
+#include "command.h"
 
-#define LINE_SIZE 128u
+#define LINE_SIZE 256u
 #define SLOT_COUNT 16u
 static void *slots[SLOT_COUNT];
 
@@ -58,18 +59,15 @@ static void error(int code) {
 }
 
 static void execute(char *line, uint32_t mb_info) {
-    char *args[4];
-    uint32_t count = 0;
-    char *p = line;
-    while (*p) {
-        while (*p == ' ') p++;
-        if (!*p) break;
-        if (count == 4) { vga_puts("Too many arguments.\n"); return; }
-        args[count++] = p;
-        while (*p && *p != ' ') p++;
-        if (*p) *p++ = 0;
+    char *args[TASK_ARGC_MAX + 1];
+    int parsed = command_split(line, LINE_SIZE, args, TASK_ARGC_MAX + 1);
+    if (parsed < 0) {
+        vga_puts(parsed == -7 ? "Too many arguments.\n" : "Invalid quoting or escape.\n");
+        return;
     }
+    unsigned count = (unsigned)parsed;
     if (!count) return;
+    int process = equal(args[0], "run") || equal(args[0], "spawn");
     int takes_number = equal(args[0], "alloc") || equal(args[0], "free") ||
         equal(args[0], "page") || equal(args[0], "kill");
     int takes_path = equal(args[0], "run") || equal(args[0], "spawn") ||
@@ -80,7 +78,7 @@ static void execute(char *line, uint32_t mb_info) {
     if (equal(args[0], "stat")) expected = 2;
     if (equal(args[0], "fetch")) expected = 4;
     if (equal(args[0], "ls") && count == 2) expected = 2;
-    if (count != expected) {
+    if ((process && count < 2) || (!process && count != expected)) {
         vga_puts("Invalid arguments. Type help.\n"); return;
     }
     uint32_t value = 0;
@@ -96,8 +94,8 @@ static void execute(char *line, uint32_t mb_info) {
                  "page <addr>    - show virtual-to-physical mapping\n"
                  "ls [mount] cat <path> write/append <path> <word>\n"
                  "cp <src> <dest> rm <path> stat <path> df sync\n"
-                 "run <path>     - run an ELF program; Esc cancels\n"
-                 "spawn <path>   - start a background ELF process\n"
+                 "run <path> [args...] - run ELF; Esc cancels\n"
+                 "spawn <path> [args...] - start background ELF\n"
                  "ps kill <pid>  - process states / termination\n"
                  "fault          - deliberately read NULL; HALTS kernel\n");
     } else if(equal(args[0], "sockets")) {
@@ -202,7 +200,7 @@ static void execute(char *line, uint32_t mb_info) {
         int status = fs_unlink(args[1]);
         if (status) error(status); else vga_puts("Removed file.\n");
     } else if (equal(args[0], "run") || equal(args[0], "spawn")) {
-        int pid = task_spawn(args[1]);
+        int pid = task_spawn_args(count - 1, (const char *const *)&args[1]);
         if (pid < 0) { error(pid); return; }
         field("Started PID ", pid); vga_putc('\n');
         if (equal(args[0], "run")) {

@@ -56,7 +56,7 @@ static struct fs_node *create(const char *path) {
     return NULL;
 }
 void ramfs_init(void) {
-    static const char motd[] = "Welcome to MiniOS v0.9: processes, storage and user UDP/TCP sockets.\n";
+    static const char motd[] = "Welcome to MiniOS v0.10: C programs, arguments, storage and user sockets.\n";
     ramfs_add("/etc/motd", motd, sizeof(motd) - 1);
 }
 int ramfs_add(const char *path, const void *data, uint32_t len) {

@@ -3,10 +3,12 @@
 #include <stdint.h>
 #include "isr.h"
 #include "vfs.h"
+#include "startup.h"
 
 #define TASK_FDS 8
 void task_init(void);
 int task_spawn(const char *path);
+int task_spawn_args(unsigned argc, const char *const *argv);
 int task_kill(uint32_t pid);
 int task_wait(uint32_t pid);
 void task_list(void);

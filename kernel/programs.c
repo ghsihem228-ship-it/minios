@@ -5,6 +5,8 @@ DECLARE(hello); DECLARE(probe); DECLARE(filedemo); DECLARE(sleep);
 DECLARE(spin); DECLARE(crash); DECLARE(readonly);
 DECLARE(isolate); DECLARE(guard); DECLARE(io);
 DECLARE(http);
+DECLARE(ctest);
+DECLARE(args);
 DECLARE(udpecho);
 DECLARE(sockprobe);
 DECLARE(sockhold);
@@ -16,6 +18,8 @@ int programs_install(void) {
     ADD(spin); ADD(crash); ADD(readonly);
     ADD(isolate); ADD(guard); ADD(io);
     ADD(http);
+    ADD(ctest);
+    ADD(args);
     ADD(udpecho);
     ADD(sockprobe);
     ADD(sockhold);
