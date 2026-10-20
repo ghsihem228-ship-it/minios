@@ -17,15 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Guest:
-    def __init__(self, qemu, ram):
+    def __init__(self, qemu, ram, disk=None, drive_args=None):
         self.tmp = tempfile.TemporaryDirectory(prefix="minios-test-")
         self.folder = Path(self.tmp.name)
         self.log = (self.folder / "qemu.log").open("w+")
+        drive = list(drive_args or [])
+        if disk is not None:
+            drive += ["-drive", f"file={disk},format=raw,if=ide,index=0"]
         self.proc = subprocess.Popen(
             [qemu, "-kernel", str(ROOT / "build/minios.bin"), "-m", str(ram),
              "-accel", "tcg", "-display", "none", "-serial", "none",
              "-monitor", "none", "-nic", "none", "-no-reboot",
-             "-qmp", f"unix:{self.folder / 'qmp'},server=on,wait=off"],
+             "-qmp", f"unix:{self.folder / 'qmp'},server=on,wait=off", *drive],
             stdout=self.log, stderr=self.log)
         self.sock = None
         self.stream = None
@@ -105,8 +108,10 @@ class Guest:
         codes = {" ": "spc", "\n": "ret", "\b": "backspace", "\t": "tab", "\x1b": "esc",
                  "/": "slash", ".": "dot", "-": "minus", "=": "equal"}
         for char in text:
-            code = codes.get(char, char)
-            self.qmp("send-key", keys=[{"type": "qcode", "data": code}], **{"hold-time": 10})
+            code = codes.get(char, char.lower())
+            keys = [{"type": "qcode", "data": code}]
+            if 'A' <= char <= 'Z': keys.insert(0, {"type": "qcode", "data": "shift"})
+            self.qmp("send-key", keys=keys, **{"hold-time": 10})
             time.sleep(0.025)
 
     def command(self, text, expected):

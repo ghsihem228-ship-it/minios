@@ -17,4 +17,5 @@ program readonly, "build/user/readonly.elf"
 program isolate, "build/user/isolate.elf"
 program guard, "build/user/guard.elf"
 program io, "build/user/io.elf"
+program diskdemo, "build/user/diskdemo.elf"
 section .note.GNU-stack noalloc noexec nowrite progbits

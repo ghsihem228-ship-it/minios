@@ -71,11 +71,27 @@ struct regs *syscall_dispatch(struct regs *r) {
     case 9: {
         struct file_handle *f = task_fd(r->ebx);
         if (!f || !f->node) { result = -9; break; }
-        fs_close(f); result = 0; break;
+        result = fs_close(f); break;
     }
     case 11: {
         struct file_handle *f = task_fd(r->ebx);
         result = f ? fs_seek(f, r->ecx) : -9; break;
+    }
+    case 12: {
+        char path[FS_PATH_MAX];
+        result = path_copy(r->ebx, path);
+        if (!result) result = fs_unlink(path);
+        break;
+    }
+    case 13: result = fs_sync(); break;
+    case 14: {
+        char path[FS_PATH_MAX]; struct fs_stat stat;
+        result = path_copy(r->ebx, path);
+        if (result) break;
+        if (!user_buffer(r->ecx, sizeof(stat), 1)) { result = -14; break; }
+        result = fs_stat(path, &stat);
+        if (!result) *(struct fs_stat *)r->ecx = stat;
+        break;
     }
     default: break;
     }

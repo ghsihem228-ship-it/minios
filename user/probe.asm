@@ -29,6 +29,27 @@ _start:
     int 0x80
     cmp eax, -9
     jne fail
+    mov eax, SYS_UNLINK
+    xor ebx, ebx
+    int 0x80
+    cmp eax, -14
+    jne fail
+    mov eax, SYS_STAT
+    mov ebx, path
+    mov ecx, _start
+    int 0x80
+    cmp eax, -14
+    jne fail
+    mov eax, SYS_STAT
+    mov ebx, path
+    mov ecx, statbuf
+    int 0x80
+    test eax, eax
+    jnz fail
+    cmp dword [statbuf], 0
+    je fail
+    cmp dword [statbuf+4], 1
+    jne fail
     mov eax, SYS_OPEN
     mov ebx, path
     xor ecx, ecx
@@ -65,3 +86,4 @@ message_len equ $-message
 path: db "/etc/motd",0
 section .bss
 zeroed: resd 1
+statbuf: resd 2

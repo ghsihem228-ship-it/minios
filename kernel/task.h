@@ -2,7 +2,7 @@
 #define TASK_H
 #include <stdint.h>
 #include "isr.h"
-#include "ramfs.h"
+#include "vfs.h"
 
 #define TASK_FDS 8
 void task_init(void);

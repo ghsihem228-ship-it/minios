@@ -55,18 +55,18 @@ static struct fs_node *create(const char *path) {
     }
     return NULL;
 }
-void fs_init(void) {
-    static const char motd[] = "Welcome to MiniOS v0.6: isolated Ring 3 processes.\n";
-    fs_add("/etc/motd", motd, sizeof(motd) - 1);
+void ramfs_init(void) {
+    static const char motd[] = "Welcome to MiniOS v0.7: processes and persistent FAT32 storage.\n";
+    ramfs_add("/etc/motd", motd, sizeof(motd) - 1);
 }
-int fs_add(const char *path, const void *data, uint32_t len) {
+int ramfs_add(const char *path, const void *data, uint32_t len) {
     if (!valid(path) || find(path)) return -22;
     struct fs_node *n = create(path);
     if (!n) return -28;
     n->data = data; n->size = len; n->readonly = 1;
     return 0;
 }
-int fs_open(struct file_handle *f, const char *path, uint32_t flags) {
+int ramfs_open(struct file_handle *f, const char *path, uint32_t flags) {
     if (f->node || !valid(path) || (flags & ~7u) ||
         ((flags & (FS_CREATE | FS_TRUNC)) && !(flags & FS_WRITE))) return -22;
     struct fs_node *n = find(path);
@@ -77,67 +77,76 @@ int fs_open(struct file_handle *f, const char *path, uint32_t flags) {
     f->node = n; f->offset = 0; f->flags = flags; n->opens++;
     return 0;
 }
-int fs_read(struct file_handle *f, void *out, uint32_t len) {
+int ramfs_read(struct file_handle *f, void *out, uint32_t len) {
+    struct fs_node *n = f->node;
     if (!f->node) return -9;
-    if (f->offset >= f->node->size) return 0;
-    uint32_t bytes = f->node->size - f->offset;
+    if (f->offset >= n->size) return 0;
+    uint32_t bytes = n->size - f->offset;
     if (len < bytes) bytes = len;
     uint8_t *p = out;
-    for (uint32_t i = 0; i < bytes; i++) p[i] = f->node->data[f->offset + i];
+    for (uint32_t i = 0; i < bytes; i++) p[i] = n->data[f->offset + i];
     f->offset += bytes;
     return bytes;
 }
-int fs_write(struct file_handle *f, const void *in, uint32_t len) {
+int ramfs_write(struct file_handle *f, const void *in, uint32_t len) {
+    struct fs_node *n = f->node;
     if (!f->node || !(f->flags & FS_WRITE)) return -9;
     if (!len) return 0;
     if (f->offset > FS_FILE_CAP || len > FS_FILE_CAP - f->offset) return -28;
-    uint8_t *data = (uint8_t *)f->node->data;
-    while (f->node->size < f->offset) data[f->node->size++] = 0;
+    uint8_t *data = (uint8_t *)n->data;
+    while (n->size < f->offset) data[n->size++] = 0;
     const uint8_t *p = in;
     for (uint32_t i = 0; i < len; i++) data[f->offset + i] = p[i];
     f->offset += len;
-    if (f->offset > f->node->size) f->node->size = f->offset;
+    if (f->offset > n->size) n->size = f->offset;
     return len;
 }
-int fs_seek(struct file_handle *f, uint32_t offset) {
+int ramfs_seek(struct file_handle *f, uint32_t offset) {
+    struct fs_node *n = f->node;
     if (!f->node) return -9;
-    if (offset > ((f->flags & FS_WRITE) ? FS_FILE_CAP : f->node->size)) return -22;
+    if (offset > ((f->flags & FS_WRITE) ? FS_FILE_CAP : n->size)) return -22;
     f->offset = offset; return offset;
 }
-void fs_close(struct file_handle *f) {
-    if (f->node) f->node->opens--;
-    f->node = NULL; f->offset = f->flags = 0;
+static int ramfs_close(struct file_handle *f) {
+    struct fs_node *n = f->node;
+    if (f->node) n->opens--;
+    f->node = NULL; f->offset = f->flags = 0; return 0;
 }
-int fs_unlink(const char *path) {
+int ramfs_unlink(const char *path) {
     struct fs_node *n = find(path);
     if (!n) return -2;
     if (n->readonly) return -30;
     if (n->opens) return -16;
     n->used = 0; return 0;
 }
-const uint8_t *fs_image(const char *path, uint32_t *len) {
+static int ramfs_stat(const char *path, struct fs_stat *out) {
     struct fs_node *n = find(path);
-    if (!n) return NULL;
-    *len = n->size; return n->data;
+    if (!n) return -2;
+    out->size = n->size; out->readonly = n->readonly; return 0;
 }
-void fs_list(void) {
+void ramfs_list(void) {
     for (unsigned i = 0; i < FS_NODES; i++) if (nodes[i].used) {
         vga_puts(nodes[i].readonly ? "ro " : "rw ");
         vga_put_dec(nodes[i].size); vga_puts(" bytes ");
         vga_puts(nodes[i].path); vga_putc('\n');
     }
 }
-int fs_self_test(void) {
+int ramfs_self_test(void) {
     struct file_handle a = {0}, b = {0};
     char out[4]; int ok = 1;
-    if (fs_open(&a, "/tmp/selftest", FS_WRITE | FS_CREATE | FS_TRUNC)) return 0;
-    ok &= fs_write(&a, "abc", 3) == 3 && fs_seek(&a, 0) == 0;
-    ok &= fs_open(&b, "/tmp/selftest", 0) == 0;
-    ok &= fs_read(&b, out, sizeof(out)) == 3 && out[0] == 'a' && out[2] == 'c';
-    ok &= fs_read(&b, out, 1) == 0 && fs_unlink("/tmp/selftest") == -16;
-    ok &= fs_seek(&a, FS_FILE_CAP) == FS_FILE_CAP && fs_write(&a, "a", 1) == -28;
-    fs_close(&a); fs_close(&b);
-    ok &= fs_unlink("/tmp/selftest") == 0;
-    ok &= fs_open(&a, "/etc/motd", FS_WRITE) == -30;
+    if (ramfs_open(&a, "/tmp/selftest", FS_WRITE | FS_CREATE | FS_TRUNC)) return 0;
+    ok &= ramfs_write(&a, "abc", 3) == 3 && ramfs_seek(&a, 0) == 0;
+    ok &= ramfs_open(&b, "/tmp/selftest", 0) == 0;
+    ok &= ramfs_read(&b, out, sizeof(out)) == 3 && out[0] == 'a' && out[2] == 'c';
+    ok &= ramfs_read(&b, out, 1) == 0 && ramfs_unlink("/tmp/selftest") == -16;
+    ok &= ramfs_seek(&a, FS_FILE_CAP) == FS_FILE_CAP && ramfs_write(&a, "a", 1) == -28;
+    ramfs_close(&a); ramfs_close(&b);
+    ok &= ramfs_unlink("/tmp/selftest") == 0;
+    ok &= ramfs_open(&a, "/etc/motd", FS_WRITE) == -30;
     return ok;
 }
+
+const struct vfs_ops ramfs_ops = {
+    ramfs_open, ramfs_read, ramfs_write, ramfs_seek, ramfs_close,
+    ramfs_unlink, ramfs_stat, ramfs_list
+};

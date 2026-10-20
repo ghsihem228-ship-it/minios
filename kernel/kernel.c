@@ -14,7 +14,7 @@
 #include "paging.h"
 #include "heap.h"
 #include "shell.h"
-#include "ramfs.h"
+#include "vfs.h"
 #include "programs.h"
 #include "syscall.h"
 #include "task.h"
@@ -38,7 +38,7 @@ static void fail(const char *msg) {
 
 void kernel_main(uint32_t magic, uint32_t mb_info) {
     vga_clear();
-    vga_set_status_left("MiniOS v0.6");
+    vga_set_status_left("MiniOS v0.7");
 
     if (magic != MULTIBOOT_MAGIC) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);

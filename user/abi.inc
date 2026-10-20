@@ -9,6 +9,9 @@
 %define SYS_CLOSE 9
 %define SYS_WRITE 10
 %define SYS_SEEK 11
+%define SYS_UNLINK 12
+%define SYS_SYNC 13
+%define SYS_STAT 14
 
 %macro print 2
     mov eax, SYS_PRINT

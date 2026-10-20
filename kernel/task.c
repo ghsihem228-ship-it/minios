@@ -7,6 +7,7 @@
 #include "timer.h"
 #include "vga.h"
 #include "keyboard.h"
+#include "heap.h"
 #include <stddef.h>
 
 #define TASKS (MAX_USER_SPACES + 1)
@@ -89,14 +90,16 @@ int task_spawn(const char *path) {
     if (!ready || current || next_pid > 0x7FFFFFFFu) return -11;
     task_reap();
     uint32_t len;
-    const uint8_t *image = fs_image(path, &len);
-    if (!image) return -2;
+    uint8_t *image;
+    int read_error = fs_read_all(path, &image, &len);
+    if (read_error) return read_error;
     unsigned i;
     for (i = 1; i < TASKS; i++)
         if (tasks[i].state == UNUSED || (tasks[i].state == ZOMBIE && tasks[i].reaped)) break;
-    if (i == TASKS) return -11;
+    if (i == TASKS) { kfree(image); heap_trim(); return -11; }
     uint32_t entry;
     int error = elf_load(i - 1, image, len, &entry);
+    kfree(image); heap_trim();
     if (error) return error;
     struct task *t = &tasks[i];
     for (unsigned j = 0; j < sizeof(*t); j++) ((uint8_t *)t)[j] = 0;

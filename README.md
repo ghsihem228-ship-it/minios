@@ -17,8 +17,11 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] Checked `int 0x80` system calls and ELF32 program loading
 - [x] RAM filesystem with file descriptors, read/write/seek and read-only built-ins
 - [x] Filesystem and process commands (`ls`, `cat`, `write`, `rm`, `run`, `spawn`, `ps`, `kill`)
+- [x] VFS mount routing, primary-master ATA PIO and persistent FAT32 files at `/disk`
+- [x] Disk-backed ELF execution, multi-cluster writes, sparse gaps and flush/error handling
 
 See [the v0.6 design and syscall ABI](docs/06-processes-userspace-ramfs.md).
+Persistent storage and its limits are documented in [v0.7 storage notes](docs/07-vfs-ata-fat32.md).
 
 ## Requirements
 
@@ -40,10 +43,11 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86 python3
 make        # builds build/minios.bin
 make run    # boots the kernel in QEMU
 make test   # headless functional tests (Python 3 + QEMU TCG, no GUI or KVM)
+make test-storage # only the new persistence/failure tests
 make clean
 ```
 
-Expected output: MiniOS v0.6, a live uptime counter, green `[ OK ]` lines
+Expected output: MiniOS v0.7, a live uptime counter, green `[ OK ]` lines
 including memory, RAMFS and ELF loader self-tests, then `minios>`.
 Try `help`, `mem`, `alloc 9001`, `heap`, `free 0`, then `test`.
 Numbers accept decimal and `0x` hexadecimal; allocations use 16 numbered slots.
@@ -69,13 +73,49 @@ Use `kill <pid>` with the PID printed by `spawn` to stop the CPU-bound task.
 `spawn` returns immediately. `write /tmp/note hello`, `cat /tmp/note` and
 `rm /tmp/note` exercise mutable files. RAMFS contents are lost on reboot.
 
+## Persistent disk (v0.7)
+
+`make run` creates `disks/minios.img` as a sparse 64 MiB FAT32 image on first
+use, then attaches it as QEMU's primary IDE disk. Existing images are preserved;
+`make clean` removes build outputs and **keeps the disk**. The image is ignored
+by Git. `make disk` can create it without starting QEMU. A different dedicated
+image can be selected with `make run DISK_IMAGE=disks/other.img`.
+
+Inside MiniOS, try:
+
+```text
+df
+write /disk/note.txt hello
+append /disk/note.txt world
+cat /disk/note.txt
+cp /bin/hello /disk/hello.elf
+run /disk/hello.elf
+run /bin/diskdemo
+ls /disk
+sync
+```
+
+Close QEMU, run `make run` again and `cat /disk/note.txt`: `helloworld` survives.
+`/tmp` remains volatile RAMFS; `/disk` is persistent. FAT names are case-insensitive
+8.3 names (for example `NOTE.TXT`); long filenames and disk subdirectories are
+not implemented. `cp` creates a new destination and refuses to overwrite one.
+`stat <path>` reports size/access, and `rm <path>` deletes a closed file.
+`/bin/diskdemo` tests Ring 3 file I/O, a sector-boundary overwrite, zero-filled
+seek gaps and `stat`/`unlink`/`sync`; it leaves `/disk/USER.DAT` for inspection.
+
+The kernel never formats a disk. Unsupported/corrupt volumes stay unmounted;
+unclean volumes mount read-only. I/O errors are reported and disable further
+writes. Successful file writes flush data and metadata, but FAT32 has no journal
+here: interrupted operations may need offline filesystem repair. This disk image
+holds files, not a standalone bootloader; QEMU still boots via `-kernel`.
+
 The heap grows to about 4 MiB, retains its backing pages after `kfree`, and
 coalesces adjacent free blocks. `trim` returns fully free trailing pages to
 the PMM. Boot stress tests trim back down afterwards, preserving RAM for user
 programs. This remains an educational single-CPU kernel with a non-preemptible
 kernel core: user tasks are timer-preempted, but kernel paths run to completion.
-There is no persistent disk filesystem, networking, SMP, dynamic linker,
-fork, demand paging or floating-point context support yet.
+There is no networking, SMP, dynamic linker, fork, demand paging or
+floating-point context support yet. Storage uses polling, not DMA/AHCI/NVMe.
 
 For cloud shells with the prepared local tools:
 
@@ -94,6 +134,11 @@ leaks. The 64 MiB run checks two CPU-bound tasks progress without yielding,
 private address spaces at identical virtual addresses, task limits and reuse.
 The suite types many commands and can take a few minutes; it runs without a
 QEMU window until `make test` completes.
+Storage tests then use fresh temporary images and QEMU processes to verify
+reboot persistence, independent on-disk chain/mirror/ownership checks, FAT32
+directory growth and reuse, MBR offsets, ENOSPC rollback and injected ATA
+write/flush failures. They never open `disks/minios.img`. If `fsck.fat` is
+installed, its read-only check must also pass; it is optional (`dosfstools`).
 To select another QEMU binary or RAM sizes:
 
 ```bash
@@ -124,9 +169,14 @@ kernel/task.c         Process table, preemption, sleep/wakeup, exit/kill/reaping
 kernel/elf.c          Validated ELF32 loader and rollback tests
 kernel/syscall.c      Ring 3 ABI, user pointer checks and descriptor operations
 kernel/ramfs.c        Bounded RAM filesystem (read-only built-ins + mutable files)
+kernel/vfs.c          Common file operations and RAMFS/FAT32 mount routing
+kernel/block.c        ATA PIO sector read/write/flush with bounded polling
+kernel/fat32.c        FAT32 root files, allocation, metadata and error handling
 kernel/programs.c     Installs embedded /bin programs into RAMFS
 user/                Freestanding NASM programs, syscall macros and linker script
 tests/smoke.py        Headless QEMU functional tests
+tests/storage.py      Persistence, host FAT inspection and fault-injection tests
+tools/mkdisk.py       Exclusive-create FAT32 image formatter; preserves existing files
 docs/                 Design notes, one per milestone
 linker.ld             Linker script (kernel loaded at 1 MiB)
 Makefile

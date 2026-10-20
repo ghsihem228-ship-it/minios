@@ -7,7 +7,7 @@
 #include "timer.h"
 #include "vga.h"
 #include "task.h"
-#include "ramfs.h"
+#include "vfs.h"
 
 #define LINE_SIZE 128u
 #define SLOT_COUNT 16u
@@ -71,8 +71,10 @@ static void execute(char *line, uint32_t mb_info) {
         equal(args[0], "page") || equal(args[0], "kill");
     int takes_path = equal(args[0], "run") || equal(args[0], "spawn") ||
         equal(args[0], "cat") || equal(args[0], "rm");
-    uint32_t expected = equal(args[0], "write") ? 3u :
+    uint32_t expected = (equal(args[0], "write") || equal(args[0], "append") || equal(args[0], "cp")) ? 3u :
         ((takes_number || takes_path) ? 2u : 1u);
+    if (equal(args[0], "stat")) expected = 2;
+    if (equal(args[0], "ls") && count == 2) expected = 2;
     if (count != expected) {
         vga_puts("Invalid arguments. Type help.\n"); return;
     }
@@ -85,7 +87,8 @@ static void execute(char *line, uint32_t mb_info) {
                  "alloc <bytes>  - allocate in one of 16 slots\n"
                  "free <id>      - release an occupied slot\n"
                  "page <addr>    - show virtual-to-physical mapping\n"
-                 "ls cat <path> write <path> <word> rm <path>\n"
+                 "ls [mount] cat <path> write/append <path> <word>\n"
+                 "cp <src> <dest> rm <path> stat <path> df sync\n"
                  "run <path>     - run an ELF program; Esc cancels\n"
                  "spawn <path>   - start a background ELF process\n"
                  "ps kill <pid>  - process states / termination\n"
@@ -107,21 +110,67 @@ static void execute(char *line, uint32_t mb_info) {
     } else if (equal(args[0], "trim")) {
         field("Released heap bytes=", heap_trim()); vga_putc('\n');
     } else if (equal(args[0], "ls")) {
-        fs_list();
+        int status = fs_list_path(count == 2 ? args[1] : "/");
+        if (status) error(status);
+    } else if (equal(args[0], "df")) {
+        fs_info();
+    } else if (equal(args[0], "sync")) {
+        int status = fs_sync();
+        if (status) error(status); else vga_puts("Disk synchronized.\n");
+    } else if (equal(args[0], "stat")) {
+        struct fs_stat s;
+        int status = fs_stat(args[1], &s);
+        if (status) error(status);
+        else { field("Size bytes=", s.size); vga_puts(s.readonly ? " read-only\n" : " read-write\n"); }
     } else if (equal(args[0], "cat")) {
-        uint32_t len;
-        const uint8_t *data = fs_image(args[1], &len);
-        if (!data) { error(-2); return; }
-        if (len >= 4 && data[0] == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F') {
-            vga_puts("ELF binary; use run or spawn.\n"); return;
-        }
-        for (uint32_t i = 0; i < len; i++)
-            vga_putc(data[i] == '\n' || (data[i] >= 32 && data[i] <= 126) ? data[i] : '.');
-        if (!len || data[len - 1] != '\n') vga_putc('\n');
-    } else if (equal(args[0], "write")) {
         struct file_handle f = {0};
-        int status = fs_open(&f, args[1], FS_WRITE | FS_CREATE | FS_TRUNC);
+        int status = fs_open(&f, args[1], 0);
         if (status) { error(status); return; }
+        uint8_t data[256]; int first = 1; char last = 0;
+        while ((status = fs_read(&f, data, sizeof(data))) > 0) {
+            if (first && status >= 4 && data[0] == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F') {
+                vga_puts("ELF binary; use run or spawn.\n"); break;
+            }
+            first = 0;
+            for (int i = 0; i < status; i++) {
+                last = data[i];
+                vga_putc(last == '\n' || (last >= 32 && last <= 126) ? last : '.');
+            }
+        }
+        fs_close(&f);
+        if (status < 0) error(status);
+        else if (last != '\n') vga_putc('\n');
+    } else if (equal(args[0], "cp")) {
+        /* Refuse equal paths before opening with TRUNC; backend identity is
+         * also checked for case-insensitive FAT aliases by using a stat-only
+         * destination policy: cp creates a new file, never overwrites. */
+        struct fs_stat exists;
+        if (!fs_stat(args[2], &exists)) { error(-17); return; }
+        struct file_handle src = {0}, dst = {0};
+        int status = fs_open(&src, args[1], 0);
+        if (status) { error(status); return; }
+        status = fs_open(&dst, args[2], FS_WRITE | FS_CREATE | FS_TRUNC);
+        if (status) { fs_close(&src); error(status); return; }
+        uint8_t data[512]; uint32_t bytes = 0;
+        while ((status = fs_read(&src, data, sizeof(data))) > 0) {
+            int wrote = fs_write(&dst, data, status);
+            if (wrote != status) { status = wrote < 0 ? wrote : -5; break; }
+            bytes += wrote;
+        }
+        fs_close(&src); fs_close(&dst);
+        if (status < 0) error(status);
+        else { field("Copied bytes=", bytes); vga_putc('\n'); }
+    } else if (equal(args[0], "write") || equal(args[0], "append")) {
+        struct file_handle f = {0};
+        int append = equal(args[0], "append");
+        int status = fs_open(&f, args[1], FS_WRITE | FS_CREATE | (append ? 0 : FS_TRUNC));
+        if (status) { error(status); return; }
+        if (append) {
+            struct fs_stat s;
+            status = fs_stat(args[1], &s);
+            if (!status) status = fs_seek(&f, s.size);
+            if (status < 0) { fs_close(&f); error(status); return; }
+        }
         uint32_t len = 0;
         while (args[2][len]) len++;
         status = fs_write(&f, args[2], len); fs_close(&f);

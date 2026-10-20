@@ -1,5 +1,8 @@
 # Processes, Ring 3, ELF and RAMFS (v0.6)
 
+Historical milestone: v0.7 adds VFS and persistent storage; see
+[the storage design](07-vfs-ata-fat32.md) for current filesystem behavior.
+
 The kernel can now load independently linked i386 programs, run them in
 Ring 3 with private physical memory, preempt them, and service checked file
 and console system calls. This is a bounded teaching kernel; it has no disk

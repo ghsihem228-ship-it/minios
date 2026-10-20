@@ -8,9 +8,12 @@ OBJS = build/boot.o build/gdt_flush.o build/isr_stubs.o \
        build/kernel.o build/vga.o build/gdt.o build/idt.o build/isr.o \
        build/pic.o build/irq.o build/timer.o build/keyboard.o build/pmm.o \
        build/paging.o build/heap.o build/shell.o build/elf.o build/task.o \
-       build/ramfs.o build/syscall.o build/programs.o build/programs_blob.o
+       build/ramfs.o build/syscall.o build/programs.o build/programs_blob.o \
+       build/vfs.o build/block.o build/fat32.o
 
-USER_PROGRAMS = hello probe filedemo sleep spin crash readonly isolate guard io
+DISK_IMAGE ?= disks/minios.img
+
+USER_PROGRAMS = hello probe filedemo sleep spin crash readonly isolate guard io diskdemo
 USER_ELFS = $(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS)))
 
 all: build/minios.bin
@@ -36,13 +39,20 @@ build/%.o: kernel/%.c $(wildcard kernel/*.h)
 build/minios.bin: $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
-run: build/minios.bin
-	qemu-system-i386 -kernel build/minios.bin
+disk:
+	python3 tools/mkdisk.py "$(DISK_IMAGE)"
+
+run: build/minios.bin disk
+	qemu-system-i386 -kernel build/minios.bin -drive file="$(DISK_IMAGE)",format=raw,if=ide,index=0
 
 test: build/minios.bin
 	python3 tests/smoke.py
+	python3 tests/storage.py
+
+test-storage: build/minios.bin
+	python3 tests/storage.py
 
 clean:
 	rm -rf build
 
-.PHONY: all run test clean
+.PHONY: all run disk test test-storage clean
