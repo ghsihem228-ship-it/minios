@@ -125,7 +125,8 @@ machine, except the existing harmless kernel breakpoint self-test.
 
 ## RAM filesystem
 
-There are 16 nodes in an absolute-path flat namespace, with names up to 63
+There are 24 nodes (increased from 16 in v0.9 for the new user programs) in an
+absolute-path flat namespace, with names up to 63
 characters. This is not a directory hierarchy: path components label files,
 and parent directories are not materialized. Relative paths, dot components
 and ambiguous traversal names are rejected. Built-in ELF images and

@@ -5,6 +5,7 @@
 #include "task.h"
 #include "timer.h"
 #include "vga.h"
+#include "socket.h"
 #include <stddef.h>
 
 extern void syscall_entry(void);
@@ -93,6 +94,19 @@ struct regs *syscall_dispatch(struct regs *r) {
         if (!result) *(struct fs_stat *)r->ecx = stat;
         break;
     }
+    case 15: result = socket_open(task_pid(), r->ebx); break;
+    case 16: result = socket_connect(task_pid(), r->ebx, r->ecx, r->edx); break;
+    case 17: /* send(socket, buffer, length): copy only, no protocol work here */
+    case 18:
+        if (r->edx > SOCK_IO_MAX) { result = -7; break; }
+        if (!user_buffer(r->ecx, r->edx, r->eax == 18)) { result = -14; break; }
+        result = r->eax == 17 ?
+            socket_send(task_pid(), r->ebx, (const uint8_t *)r->ecx, r->edx) :
+            socket_recv(task_pid(), r->ebx, (uint8_t *)r->ecx, r->edx);
+        break;
+    case 19: result = socket_close(task_pid(), r->ebx); break;
+    case 20: result = socket_status(task_pid(), r->ebx); break;
+    case 21: result = socket_bind(task_pid(), r->ebx, r->ecx); break;
     default: break;
     }
     r->eax = result;

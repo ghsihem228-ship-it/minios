@@ -8,6 +8,8 @@
 #include "vga.h"
 #include "keyboard.h"
 #include "heap.h"
+#include "net.h"
+#include "socket.h"
 #include <stddef.h>
 
 #define TASKS (MAX_USER_SPACES + 1)
@@ -80,6 +82,7 @@ void task_reap(void) {
     for (unsigned i = 1; i < TASKS; i++) {
         struct task *t = &tasks[i];
         if (t->state != ZOMBIE || t->reaped) continue;
+        socket_reap(t->pid);
         for (unsigned j = 0; j < TASK_FDS; j++) fs_close(&t->files[j]);
         paging_space_destroy(i - 1);
         t->reaped = 1;
@@ -159,6 +162,7 @@ int task_kill(uint32_t pid) {
 }
 int task_wait(uint32_t pid) {
     for (;;) {
+        net_poll();
         for (unsigned i = 1; i < TASKS; i++) if (tasks[i].pid == pid) {
             if (tasks[i].state == ZOMBIE) {
                 int code = tasks[i].code; task_reap(); return code;

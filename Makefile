@@ -10,12 +10,13 @@ OBJS = build/boot.o build/gdt_flush.o build/isr_stubs.o \
        build/paging.o build/heap.o build/shell.o build/elf.o build/task.o \
        build/ramfs.o build/syscall.o build/programs.o build/programs_blob.o \
        build/vfs.o build/block.o build/fat32.o \
-       build/pci.o build/rtl8139.o build/net_wire.o build/net.o
+       build/pci.o build/rtl8139.o build/net_wire.o build/net.o \
+       build/tcp_wire.o build/socket.o
 
 DISK_IMAGE ?= disks/minios.img
 NET_FILES ?= netfiles
 
-USER_PROGRAMS = hello probe filedemo sleep spin crash readonly isolate guard io diskdemo
+USER_PROGRAMS = hello probe filedemo sleep spin crash readonly isolate guard io diskdemo http udpecho sockprobe sockhold
 USER_ELFS = $(addprefix build/user/,$(addsuffix .elf,$(USER_PROGRAMS)))
 
 all: build/minios.bin
@@ -55,6 +56,7 @@ test: build/minios.bin test-wire
 	python3 tests/smoke.py
 	python3 tests/storage.py
 	python3 tests/network.py
+	python3 tests/sockets.py
 
 test-storage: build/minios.bin
 	python3 tests/storage.py
@@ -62,12 +64,17 @@ test-storage: build/minios.bin
 test-network: build/minios.bin test-wire
 	python3 tests/network.py
 
+test-sockets: build/minios.bin test-wire
+	python3 tests/sockets.py
+
 test-wire: kernel/net_wire.c kernel/net_wire.h tests/net_wire_test.c
 	@mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Ikernel tests/net_wire_test.c kernel/net_wire.c -o build/net-wire-test
 	./build/net-wire-test
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Ikernel tests/socket_wire_test.c kernel/tcp_wire.c kernel/net_wire.c -o build/socket-wire-test
+	./build/socket-wire-test
 
 clean:
 	rm -rf build
 
-.PHONY: all run disk netfiles test test-storage test-network test-wire clean
+.PHONY: all run disk netfiles test test-storage test-network test-sockets test-wire clean

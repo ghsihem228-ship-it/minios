@@ -1,6 +1,7 @@
-/* Small IPv4 host stack. One synchronous task-0 client at a time; no socket
- * API, forwarding, IP fragments, TCP or IRQ-side protocol processing. */
+/* IPv4 host stack: bounded shell clients and task-0 UDP/TCP socket service.
+ * No forwarding, fragment reassembly or IRQ-side protocol processing. */
 #include "net.h"
+#include "socket.h"
 #include "net_wire.h"
 #include "pci.h"
 #include "rtl8139.h"
@@ -25,7 +26,7 @@ struct neighbor {
     int valid;
 };
 static struct neighbor neighbors[8];
-static uint32_t arp_pending;
+static uint32_t arp_pending, arp_sent;
 static struct dhcp_offer offer;
 static uint32_t dhcp_xid;
 static int dhcp_phase;
@@ -152,26 +153,31 @@ static int route(uint32_t target, uint8_t hw[6]) {
         return 0;
     arp_pending = hop;
     for (unsigned attempt = 0; attempt < 3; attempt++) {
+        arp_sent = timer_ticks();
         int error = send_arp(1, broadcast, hop);
         if (error && error != -11) {
-            arp_pending = 0;
+            if (arp_pending == hop)
+                arp_pending = 0;
             return error;
         }
         uint32_t deadline = timer_ticks() + 50;
         while (!expired(deadline)) {
             net_poll();
             if (neighbor(hop, hw)) {
-                arp_pending = 0;
+                if (arp_pending == hop)
+                    arp_pending = 0;
                 return 0;
             }
             error = idle();
             if (error) {
-                arp_pending = 0;
+                if (arp_pending == hop)
+                    arp_pending = 0;
                 return error;
             }
         }
     }
-    arp_pending = 0;
+    if (arp_pending == hop)
+        arp_pending = 0;
     return -110;
 }
 static int ip_mac(uint32_t src, uint32_t target, uint8_t protocol, const uint8_t *payload,
@@ -321,6 +327,8 @@ static void udp_receive(uint32_t source, uint32_t destination, const uint8_t *p,
             drops++;
         return;
     }
+    if (destination == ip && configured && !socket_udp_receive(source, from, to, data, bytes))
+        return;
     drops++;
 }
 static void receive(const uint8_t *frame, unsigned len) {
@@ -343,9 +351,10 @@ static void receive(const uint8_t *frame, unsigned len) {
         if (op == 1) {
             learn(sender, a + 8);
             send_arp(2, a + 8, sender);
-        } else if (op == 2 && sender == arp_pending && nw_equal(a + 18, mac, 6))
+        } else if (op == 2 && sender == arp_pending && nw_equal(a + 18, mac, 6)) {
             learn(sender, a + 8);
-        else
+            arp_pending = 0;
+        } else
             drops++;
         return;
     }
@@ -367,6 +376,11 @@ static void receive(const uint8_t *frame, unsigned len) {
     }
     p += header;
     unsigned bytes = total - header;
+    if (frame[23] == 6 && configured && dst == ip) {
+        if (socket_tcp_receive(src, dst, p, bytes))
+            drops++;
+        return;
+    }
     if (frame[23] == 17) {
         udp_receive(src, dst, p, bytes);
         return;
@@ -388,6 +402,35 @@ static void receive(const uint8_t *frame, unsigned len) {
     } else
         drops++;
 }
+int net_ready(void) {
+    if (!available || !rtl_link())
+        return -100;
+    return configured ? 0 : -107;
+}
+uint32_t net_address(void) { return ip; }
+int net_transport(uint32_t target, unsigned protocol, const uint8_t *p, unsigned len) {
+    int error = net_ready();
+    if (error)
+        return error;
+    if (!nw_unicast(target) || (protocol != 6 && protocol != 17))
+        return -22;
+    uint32_t hop = (target & mask) == (ip & mask) ? target : router;
+    if (!hop)
+        return -101;
+    uint8_t hw[6];
+    if (!neighbor(hop, hw)) {
+        uint32_t now = timer_ticks();
+        if (!arp_pending || (int32_t)(now - arp_sent) >= 50) {
+            arp_pending = hop;
+            arp_sent = now;
+            error = send_arp(1, broadcast, hop);
+            if (error && error != -11)
+                return error;
+        }
+        return -11;
+    }
+    return ip_mac(ip, target, protocol, p, len, hw);
+}
 void net_init(void) {
     pci_init();
     available = rtl_init(mac) == 0;
@@ -395,8 +438,10 @@ void net_init(void) {
                        : "Network: no supported RTL8139; offline\n");
 }
 void net_poll(void) {
-    if (!available)
+    if (!available) {
+        socket_network_down(-100);
         return;
+    }
     if (configured && !forever && expired(lease_end)) {
         configured = 0;
         ip = mask = router = dns = 0;
@@ -414,6 +459,7 @@ void net_poll(void) {
         rx_count++;
         receive(rx_frame, len);
     }
+    socket_service();
 }
 static int dhcp_send(unsigned type) {
     uint8_t p[320] = {0};
@@ -457,7 +503,9 @@ static int dhcp_send(unsigned type) {
 int net_dhcp(void) {
     if (!available || !rtl_link())
         return -100;
+    socket_network_down(-102);
     configured = 0;
+    arp_pending = 0;
     ip = mask = router = dns = 0;
     for (unsigned i = 0; i < 8; i++)
         neighbors[i].valid = 0;

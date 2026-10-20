@@ -1,5 +1,8 @@
 # v0.8: PCI, Ethernet and a bounded IPv4 host
 
+Historical milestone: v0.9 adds UDP/TCP user sockets and a Ring 3 HTTP example;
+see [the socket ABI and TCP design](09-tcp-user-sockets.md).
+
 MiniOS can now obtain a network configuration, exchange Ethernet/IP packets,
 resolve a DNS name, and download a file to persistent storage. The end-to-end
 example downloads `hello.elf` through QEMU's built-in TFTP server, saves it to

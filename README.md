@@ -21,10 +21,13 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] Disk-backed ELF execution, multi-cluster writes, sparse gaps and flush/error handling
 - [x] PCI discovery, RTL8139 Ethernet DMA and bounded packet polling
 - [x] IPv4, ARP, DHCP, ICMP echo, DNS lookup/cache and TFTP downloads to disk
+- [x] Process-owned nonblocking UDP/TCP sockets and checked network syscalls
+- [x] Ring 3 HTTP client, bounded TCP retransmission/flow control and socket cleanup
 
 See [the v0.6 design and syscall ABI](docs/06-processes-userspace-ramfs.md).
 Persistent storage and its limits are documented in [v0.7 storage notes](docs/07-vfs-ata-fat32.md).
 Networking and its limits are documented in [v0.8 networking notes](docs/08-networking.md).
+The socket ABI and TCP limits are documented in [v0.9 socket notes](docs/09-tcp-user-sockets.md).
 
 ## Requirements
 
@@ -48,11 +51,12 @@ make        # builds build/minios.bin
 make run    # boots the kernel in QEMU
 make test   # headless functional tests (Python 3 + QEMU TCG, no GUI or KVM)
 make test-storage # only persistence/failure tests
-make test-network # network integration and sanitized packet decoder tests
+make test-network # v0.8 network integration and sanitized packet decoder tests
+make test-sockets # Ring 3 TCP/UDP, HTTP interoperability and TCP fault tests
 make clean
 ```
 
-Expected output: MiniOS v0.8, a live uptime counter, green `[ OK ]` lines
+Expected output: MiniOS v0.9, a live uptime counter, green `[ OK ]` lines
 including memory, RAMFS and ELF loader self-tests, then `minios>`.
 Try `help`, `mem`, `alloc 9001`, `heap`, `free 0`, then `test`.
 Numbers accept decimal and `0x` hexadecimal; allocations use 16 numbered slots.
@@ -181,9 +185,9 @@ retains its 4 KiB per-file limit; use `/disk` for larger files.
 Put your own files under `netfiles/`, or select a separate directory with
 `make run NET_FILES=/path/to/files`. QEMU exposes this host directory through
 its TFTP service to the guest. `make clean` preserves it. With an unsupported or
-absent NIC the kernel stays usable offline. This milestone has no TCP, HTTP,
-TLS, IPv6, user socket API, or automatic DHCP renewal. See the design note for
-protocol limits and the meaning of `net` counters.
+absent NIC the kernel stays usable offline. DHCP does not renew automatically.
+v0.9 adds TCP and user sockets below; TLS and IPv6 remain unimplemented. See
+the design note for protocol limits and the meaning of `net` counters.
 
 `make test-network` boots actual RTL8139 hardware emulation at 2/64 MiB and tests
 DHCP, ping, TFTP and downloaded Ring 3 ELF execution. An independent local
@@ -192,6 +196,62 @@ packet loss, retransmission, transfer IDs, size limits, background scheduling,
 cancellation and resource recovery. Independent FAT inspection and a fresh VM
 check downloaded bytes and persistence. A host sanitizer harness also runs
 100,000 malformed-packet cases against the kernel's DNS/DHCP decoders.
+
+## User-space sockets and HTTP (v0.9)
+
+Ring 3 programs now have process-owned UDP/TCP sockets. The kernel performs
+handshakes, checksum validation, bounded retransmission, MSS segmentation,
+receive-window updates and orderly FIN/ACK closure. Socket syscalls are
+nonblocking: a program sleeps/yields while waiting, and the kernel network loop
+continues servicing all connections. `sockets` displays the bounded connection
+table, owners, states, queued data and retry/rejection counters.
+
+Update/build and run the automated checks first:
+
+```bash
+make
+make test-sockets
+```
+
+For the interactive HTTP example, keep a local server running in a **second
+Ubuntu/WSL terminal**:
+
+```bash
+cd ~/minios
+make netfiles
+python3 -m http.server 8080 --bind 127.0.0.1 --directory netfiles
+```
+
+In the first terminal run `make run`, then inside MiniOS:
+
+```text
+dhcp
+run /bin/http
+sockets
+```
+
+`/bin/http` connects to the host through QEMU's `10.0.2.2:8080`, sends an HTTP/1.0
+request for `/welcome.txt`, prints the response and its byte count/FNV-1a digest,
+and exits after EOF. Expect `Hello from the MiniOS network!` followed by
+`[user] HTTP download complete` and status 0. It has a ten-second application
+wait limit. This is a fixed demonstration endpoint, not a browser, HTTPS client,
+or general HTTP parser. No public Internet is needed. Stop the host server with
+Ctrl+C when done. Socket tests start their own temporary listeners on ports
+8080/9000; stop your demo server before running them.
+
+`run /bin/sockprobe` checks ownership, pointer permissions, argument limits and
+socket quotas without an external server. `/bin/udpecho` tests a UDP echo peer
+at the host's port 9000. `/bin/sockhold` keeps a TCP connection open for `ps`,
+`sockets` and `kill` experiments. Exit, kill and process faults reclaim the
+owner's remaining sockets; explicit TCP close can briefly retain a detached
+connection for the closing handshake.
+
+Limits: eight global socket records, four descriptors per process, one queued
+send of up to 1024 bytes, 2048 buffered TCP receive bytes or two UDP datagrams.
+TCP supports active opens with one segment in flight (maximum 512 bytes),
+bounded retries and zero-window probes. There is no listen/accept, socket FD
+integration with file descriptors, TCP congestion-control algorithm, TLS, IPv6,
+or general POSIX socket compatibility. See the design note for exact semantics.
 
 ## Project layout
 
@@ -224,12 +284,16 @@ kernel/pci.c          PCI configuration-space discovery
 kernel/rtl8139.c      Polling Ethernet driver with RX ring and four TX DMA buffers
 kernel/net.c          ARP/IPv4, DHCP, ping, DNS and bounded TFTP client
 kernel/net_wire.c     Bounded wire codecs shared with sanitizer tests
+kernel/tcp_wire.c     TCP header/options/checksum validation
+kernel/socket.c       Process-owned UDP/TCP queues, state machine and timers
 kernel/programs.c     Installs embedded /bin programs into RAMFS
 user/                Freestanding NASM programs, syscall macros and linker script
 tests/smoke.py        Headless QEMU functional tests
 tests/storage.py      Persistence, host FAT inspection and fault-injection tests
 tests/network.py      Real QEMU network and deterministic Ethernet fault fixture
-tests/net_wire_test.c Sanitized packet decoder checks and fuzzing
+tests/net_wire_test.c Sanitized DNS/DHCP checks and fuzzing
+tests/socket_wire_test.c Sanitized TCP packet decoder checks and fuzzing
+tests/sockets.py      Real host TCP/UDP, Ring 3 HTTP and fault-injecting TCP peer
 tools/netfiles.py     Preserve/create local TFTP example files
 tools/mkdisk.py       Exclusive-create FAT32 image formatter; preserves existing files
 docs/                 Design notes, one per milestone

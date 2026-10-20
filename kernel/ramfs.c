@@ -4,7 +4,7 @@
 #include "vga.h"
 #include <stddef.h>
 
-#define FS_NODES 16
+#define FS_NODES 24
 struct fs_node {
     char path[FS_PATH_MAX];
     const uint8_t *data;
@@ -56,7 +56,7 @@ static struct fs_node *create(const char *path) {
     return NULL;
 }
 void ramfs_init(void) {
-    static const char motd[] = "Welcome to MiniOS v0.8: processes, persistent storage and IPv4 networking.\n";
+    static const char motd[] = "Welcome to MiniOS v0.9: processes, storage and user UDP/TCP sockets.\n";
     ramfs_add("/etc/motd", motd, sizeof(motd) - 1);
 }
 int ramfs_add(const char *path, const void *data, uint32_t len) {

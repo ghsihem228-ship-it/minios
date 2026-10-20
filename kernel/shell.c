@@ -10,6 +10,7 @@
 #include "vfs.h"
 #include "net.h"
 #include "pci.h"
+#include "socket.h"
 
 #define LINE_SIZE 128u
 #define SLOT_COUNT 16u
@@ -88,7 +89,7 @@ static void execute(char *line, uint32_t mb_info) {
     }
     if (equal(args[0], "help")) {
         vga_puts("help clear uptime mem mmap heap trim test\n"
-                 "pci net ip arp dhcp ping <ip> resolve <name>\n"
+                 "pci net ip arp dhcp sockets ping <ip> resolve <name>\n"
                  "fetch <server-ip> <remote> <new-local-path>\n"
                  "alloc <bytes>  - allocate in one of 16 slots\n"
                  "free <id>      - release an occupied slot\n"
@@ -99,6 +100,8 @@ static void execute(char *line, uint32_t mb_info) {
                  "spawn <path>   - start a background ELF process\n"
                  "ps kill <pid>  - process states / termination\n"
                  "fault          - deliberately read NULL; HALTS kernel\n");
+    } else if(equal(args[0], "sockets")) {
+        socket_list();
     } else if (equal(args[0], "pci")) {
         pci_list();
     } else if (equal(args[0], "net") || equal(args[0], "ip")) {
