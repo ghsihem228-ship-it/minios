@@ -17,17 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Guest:
-    def __init__(self, qemu, ram, disk=None, drive_args=None):
+    def __init__(self, qemu, ram, disk=None, drive_args=None, net_args=None):
         self.tmp = tempfile.TemporaryDirectory(prefix="minios-test-")
         self.folder = Path(self.tmp.name)
         self.log = (self.folder / "qemu.log").open("w+")
         drive = list(drive_args or [])
+        network = ["-nic", "none"] if net_args is None else list(net_args)
         if disk is not None:
             drive += ["-drive", f"file={disk},format=raw,if=ide,index=0"]
         self.proc = subprocess.Popen(
             [qemu, "-kernel", str(ROOT / "build/minios.bin"), "-m", str(ram),
              "-accel", "tcg", "-display", "none", "-serial", "none",
-             "-monitor", "none", "-nic", "none", "-no-reboot",
+             "-monitor", "none", *network, "-no-reboot",
              "-qmp", f"unix:{self.folder / 'qmp'},server=on,wait=off", *drive],
             stdout=self.log, stderr=self.log)
         self.sock = None
@@ -70,8 +71,8 @@ class Guest:
         self.log.close()
         self.tmp.cleanup()
 
-    def qmp(self, name, **args):
-        self.stream.write((json.dumps({"execute": name, "arguments": args}) + "\n").encode())
+    def qmp(self, command, **args):
+        self.stream.write((json.dumps({"execute": command, "arguments": args}) + "\n").encode())
         while True:
             line = self.stream.readline()
             if not line:
@@ -114,12 +115,12 @@ class Guest:
             self.qmp("send-key", keys=keys, **{"hold-time": 10})
             time.sleep(0.025)
 
-    def command(self, text, expected):
+    def command(self, text, expected, timeout=15):
         # A fresh screen makes every assertion belong to this command.
         self.type("clear\n")
         self.wait_for("minios>")
         self.type(text + "\n")
-        screen = self.wait_for(expected)
+        screen = self.wait_for(expected, timeout=timeout)
         assert "[FAIL]" not in screen and "CPU EXCEPTION" not in screen, screen
         return screen
 

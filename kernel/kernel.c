@@ -19,6 +19,7 @@
 #include "syscall.h"
 #include "task.h"
 #include "elf.h"
+#include "net.h"
 
 #define MULTIBOOT_MAGIC 0x2BADB002
 
@@ -38,7 +39,7 @@ static void fail(const char *msg) {
 
 void kernel_main(uint32_t magic, uint32_t mb_info) {
     vga_clear();
-    vga_set_status_left("MiniOS v0.7");
+    vga_set_status_left("MiniOS v0.8");
 
     if (magic != MULTIBOOT_MAGIC) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
@@ -112,6 +113,7 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
     syscall_install();
     task_init();
     ok("Ring 3 / TSS / int 0x80 / preemptive scheduler ready");
+    net_init();
 
     /* Turn interrupts on: from now on the timer and keyboard can interrupt us. */
     __asm__ volatile ("sti");

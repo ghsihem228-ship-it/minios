@@ -56,7 +56,7 @@ static struct fs_node *create(const char *path) {
     return NULL;
 }
 void ramfs_init(void) {
-    static const char motd[] = "Welcome to MiniOS v0.7: processes and persistent FAT32 storage.\n";
+    static const char motd[] = "Welcome to MiniOS v0.8: processes, persistent storage and IPv4 networking.\n";
     ramfs_add("/etc/motd", motd, sizeof(motd) - 1);
 }
 int ramfs_add(const char *path, const void *data, uint32_t len) {
@@ -67,9 +67,10 @@ int ramfs_add(const char *path, const void *data, uint32_t len) {
     return 0;
 }
 int ramfs_open(struct file_handle *f, const char *path, uint32_t flags) {
-    if (f->node || !valid(path) || (flags & ~7u) ||
+    if (f->node || !valid(path) || (flags & ~15u) || ((flags & FS_EXCL) && !(flags & FS_CREATE)) ||
         ((flags & (FS_CREATE | FS_TRUNC)) && !(flags & FS_WRITE))) return -22;
     struct fs_node *n = find(path);
+    if (n && (flags & FS_EXCL)) return -17;
     if (!n && (flags & FS_CREATE)) n = create(path);
     if (!n) return (flags & FS_CREATE) ? -28 : -2;
     if (n->readonly && (flags & FS_WRITE)) return -30;

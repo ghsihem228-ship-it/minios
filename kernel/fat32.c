@@ -297,6 +297,7 @@ static int fat_open(struct file_handle *f, const char *path, uint32_t flags) {
     struct location entry, empty;
     uint32_t tail = v.root;
     error = lookup(name, &entry, &empty, &tail);
+    if (!error && (flags & FS_EXCL)) return -17;
     if (error && error != -2) return error;
     struct fat_node *n = error ? NULL : active(&entry);
     if (!n) for (unsigned i = 0; i < OPEN_NODES; i++)

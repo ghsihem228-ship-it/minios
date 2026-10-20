@@ -8,6 +8,8 @@
 #include "vga.h"
 #include "task.h"
 #include "vfs.h"
+#include "net.h"
+#include "pci.h"
 
 #define LINE_SIZE 128u
 #define SLOT_COUNT 16u
@@ -55,13 +57,13 @@ static void error(int code) {
 }
 
 static void execute(char *line, uint32_t mb_info) {
-    char *args[3];
+    char *args[4];
     uint32_t count = 0;
     char *p = line;
     while (*p) {
         while (*p == ' ') p++;
         if (!*p) break;
-        if (count == 3) { vga_puts("Too many arguments.\n"); return; }
+        if (count == 4) { vga_puts("Too many arguments.\n"); return; }
         args[count++] = p;
         while (*p && *p != ' ') p++;
         if (*p) *p++ = 0;
@@ -70,10 +72,12 @@ static void execute(char *line, uint32_t mb_info) {
     int takes_number = equal(args[0], "alloc") || equal(args[0], "free") ||
         equal(args[0], "page") || equal(args[0], "kill");
     int takes_path = equal(args[0], "run") || equal(args[0], "spawn") ||
-        equal(args[0], "cat") || equal(args[0], "rm");
+        equal(args[0], "cat") || equal(args[0], "rm") ||
+        equal(args[0], "ping") || equal(args[0], "resolve");
     uint32_t expected = (equal(args[0], "write") || equal(args[0], "append") || equal(args[0], "cp")) ? 3u :
         ((takes_number || takes_path) ? 2u : 1u);
     if (equal(args[0], "stat")) expected = 2;
+    if (equal(args[0], "fetch")) expected = 4;
     if (equal(args[0], "ls") && count == 2) expected = 2;
     if (count != expected) {
         vga_puts("Invalid arguments. Type help.\n"); return;
@@ -84,6 +88,8 @@ static void execute(char *line, uint32_t mb_info) {
     }
     if (equal(args[0], "help")) {
         vga_puts("help clear uptime mem mmap heap trim test\n"
+                 "pci net ip arp dhcp ping <ip> resolve <name>\n"
+                 "fetch <server-ip> <remote> <new-local-path>\n"
                  "alloc <bytes>  - allocate in one of 16 slots\n"
                  "free <id>      - release an occupied slot\n"
                  "page <addr>    - show virtual-to-physical mapping\n"
@@ -93,6 +99,19 @@ static void execute(char *line, uint32_t mb_info) {
                  "spawn <path>   - start a background ELF process\n"
                  "ps kill <pid>  - process states / termination\n"
                  "fault          - deliberately read NULL; HALTS kernel\n");
+    } else if (equal(args[0], "pci")) {
+        pci_list();
+    } else if (equal(args[0], "net") || equal(args[0], "ip")) {
+        net_info();
+    } else if (equal(args[0], "arp")) {
+        net_arp_list();
+    } else if (equal(args[0], "dhcp") || equal(args[0], "ping") ||
+               equal(args[0], "resolve") || equal(args[0], "fetch")) {
+        int status = equal(args[0], "dhcp") ? net_dhcp() :
+            equal(args[0], "ping") ? net_ping(args[1]) :
+            equal(args[0], "resolve") ? net_resolve(args[1]) :
+            net_fetch(args[1], args[2], args[3]);
+        if (status) error(status);
     } else if (equal(args[0], "clear")) {
         vga_clear();
     } else if (equal(args[0], "uptime")) {
@@ -149,7 +168,7 @@ static void execute(char *line, uint32_t mb_info) {
         struct file_handle src = {0}, dst = {0};
         int status = fs_open(&src, args[1], 0);
         if (status) { error(status); return; }
-        status = fs_open(&dst, args[2], FS_WRITE | FS_CREATE | FS_TRUNC);
+        status = fs_open(&dst, args[2], FS_WRITE | FS_CREATE | FS_EXCL);
         if (status) { fs_close(&src); error(status); return; }
         uint8_t data[512]; uint32_t bytes = 0;
         while ((status = fs_read(&src, data, sizeof(data))) > 0) {

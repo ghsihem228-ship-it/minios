@@ -4,3 +4,5 @@ build/
 *.iso
 __pycache__/
 disks/
+
+netfiles/

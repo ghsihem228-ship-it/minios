@@ -6,6 +6,7 @@
 #define FS_WRITE 1u
 #define FS_CREATE 2u
 #define FS_TRUNC 4u
+#define FS_EXCL 8u
 struct file_handle;
 struct fs_stat { uint32_t size; int readonly; };
 struct vfs_ops {

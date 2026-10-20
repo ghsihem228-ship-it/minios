@@ -12,6 +12,7 @@
 #include "pic.h"
 #include "io.h"
 #include "task.h"
+#include "net.h"
 
 #define KBD_DATA_PORT 0x60
 #define BUFFER_SIZE   256
@@ -95,6 +96,7 @@ int keyboard_poll(void) {
 
 char keyboard_getchar(void) {
     for (;;) {
+        net_poll();
         task_reap();
         __asm__ volatile ("cli");
         if (head != tail) {

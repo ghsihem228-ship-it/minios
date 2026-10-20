@@ -113,7 +113,8 @@ between validation and copying.
 | 11 | seek (absolute) | fd | offset | — |
 
 Open flags: 0 = read, 1 = read/write, 2 = create, 4 = truncate; create/truncate
-require read/write. Common errno values: EPERM 1, ENOENT 2, ESRCH 3, E2BIG 7,
+require read/write. v0.8 adds 8 = exclusive creation (requires create); an
+existing name returns EEXIST 17 without truncation. Common errno values: EPERM 1, ENOENT 2, ESRCH 3, E2BIG 7,
 ENOEXEC 8, EBADF 9, EAGAIN 11, ENOMEM 12, EFAULT 14, EBUSY 16, EINVAL 22,
 EMFILE 24, ENOSPC 28, EROFS 30, ENAMETOOLONG 36, ENOSYS 38. Shell errors print
 the positive errno number; user code receives the negative value.

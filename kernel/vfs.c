@@ -46,7 +46,7 @@ int fs_add(const char *path, const void *data, uint32_t len) {
     return ramfs_add(path, data, len);
 }
 int fs_open(struct file_handle *f, const char *path, uint32_t flags) {
-    if (!f || f->node || !path_valid(path) || (flags & ~7u) ||
+    if (!f || f->node || !path_valid(path) || (flags & ~15u) || ((flags & FS_EXCL) && !(flags & FS_CREATE)) ||
         ((flags & (FS_CREATE | FS_TRUNC)) && !(flags & FS_WRITE))) return -22;
     const struct vfs_ops *ops = route(&path);
     if (!ops) return -19;

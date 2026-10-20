@@ -19,9 +19,12 @@ A small x86 operating system kernel written from scratch in C and assembly, buil
 - [x] Filesystem and process commands (`ls`, `cat`, `write`, `rm`, `run`, `spawn`, `ps`, `kill`)
 - [x] VFS mount routing, primary-master ATA PIO and persistent FAT32 files at `/disk`
 - [x] Disk-backed ELF execution, multi-cluster writes, sparse gaps and flush/error handling
+- [x] PCI discovery, RTL8139 Ethernet DMA and bounded packet polling
+- [x] IPv4, ARP, DHCP, ICMP echo, DNS lookup/cache and TFTP downloads to disk
 
 See [the v0.6 design and syscall ABI](docs/06-processes-userspace-ramfs.md).
 Persistent storage and its limits are documented in [v0.7 storage notes](docs/07-vfs-ata-fat32.md).
+Networking and its limits are documented in [v0.8 networking notes](docs/08-networking.md).
 
 ## Requirements
 
@@ -29,7 +32,8 @@ Persistent storage and its limits are documented in [v0.7 storage notes](docs/07
 - `nasm`
 - `ld` (binutils)
 - `qemu-system-i386`
-- Python 3 (for the automated QEMU tests only)
+- Python 3 (for disk/network example preparation and automated QEMU tests)
+- AddressSanitizer/UndefinedBehaviorSanitizer runtime libraries (included by Ubuntu/Debian GCC)
 
 On Debian/Ubuntu:
 
@@ -43,11 +47,12 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86 python3
 make        # builds build/minios.bin
 make run    # boots the kernel in QEMU
 make test   # headless functional tests (Python 3 + QEMU TCG, no GUI or KVM)
-make test-storage # only the new persistence/failure tests
+make test-storage # only persistence/failure tests
+make test-network # network integration and sanitized packet decoder tests
 make clean
 ```
 
-Expected output: MiniOS v0.7, a live uptime counter, green `[ OK ]` lines
+Expected output: MiniOS v0.8, a live uptime counter, green `[ OK ]` lines
 including memory, RAMFS and ELF loader self-tests, then `minios>`.
 Try `help`, `mem`, `alloc 9001`, `heap`, `free 0`, then `test`.
 Numbers accept decimal and `0x` hexadecimal; allocations use 16 numbered slots.
@@ -145,6 +150,49 @@ To select another QEMU binary or RAM sizes:
 python3 tests/smoke.py --qemu qemu-system-i386 --ram 2 64 128
 ```
 
+## Networking (v0.8)
+
+`make run` also attaches an RTL8139 NIC to QEMU's user network. It prepares
+`netfiles/welcome.txt` and `netfiles/hello.elf` for QEMU's built-in TFTP server,
+preserving existing files. No root, TAP interface, external server or Internet
+connection is required for this demonstration:
+
+```text
+pci
+dhcp
+net
+ping 10.0.2.2
+arp
+fetch 10.0.2.2 welcome.txt /disk/net.txt
+cat /disk/net.txt
+fetch 10.0.2.2 hello.elf /disk/net.elf
+run /disk/net.elf
+```
+
+The default QEMU network gives the guest `10.0.2.15`, gateway/TFTP server
+`10.0.2.2` and DNS proxy `10.0.2.3`. `resolve example.com` uses that DNS proxy
+and requires the host to have working DNS access. Tests use a local DNS fixture
+instead of public servers. `fetch` takes a numeric IPv4 server address and a
+relative remote filename, downloads through TFTP, then creates a new local file;
+it refuses existing destinations, including FAT case aliases. Press Esc to
+cancel network waits. Downloads are limited to 256 KiB and 30 seconds. RAMFS
+retains its 4 KiB per-file limit; use `/disk` for larger files.
+
+Put your own files under `netfiles/`, or select a separate directory with
+`make run NET_FILES=/path/to/files`. QEMU exposes this host directory through
+its TFTP service to the guest. `make clean` preserves it. With an unsupported or
+absent NIC the kernel stays usable offline. This milestone has no TCP, HTTP,
+TLS, IPv6, user socket API, or automatic DHCP renewal. See the design note for
+protocol limits and the meaning of `net` counters.
+
+`make test-network` boots actual RTL8139 hardware emulation at 2/64 MiB and tests
+DHCP, ping, TFTP and downloaded Ring 3 ELF execution. An independent local
+Ethernet peer exercises DNS compression/CNAME/cache/errors, invalid packets,
+packet loss, retransmission, transfer IDs, size limits, background scheduling,
+cancellation and resource recovery. Independent FAT inspection and a fresh VM
+check downloaded bytes and persistence. A host sanitizer harness also runs
+100,000 malformed-packet cases against the kernel's DNS/DHCP decoders.
+
 ## Project layout
 
 ```
@@ -172,10 +220,17 @@ kernel/ramfs.c        Bounded RAM filesystem (read-only built-ins + mutable file
 kernel/vfs.c          Common file operations and RAMFS/FAT32 mount routing
 kernel/block.c        ATA PIO sector read/write/flush with bounded polling
 kernel/fat32.c        FAT32 root files, allocation, metadata and error handling
+kernel/pci.c          PCI configuration-space discovery
+kernel/rtl8139.c      Polling Ethernet driver with RX ring and four TX DMA buffers
+kernel/net.c          ARP/IPv4, DHCP, ping, DNS and bounded TFTP client
+kernel/net_wire.c     Bounded wire codecs shared with sanitizer tests
 kernel/programs.c     Installs embedded /bin programs into RAMFS
 user/                Freestanding NASM programs, syscall macros and linker script
 tests/smoke.py        Headless QEMU functional tests
 tests/storage.py      Persistence, host FAT inspection and fault-injection tests
+tests/network.py      Real QEMU network and deterministic Ethernet fault fixture
+tests/net_wire_test.c Sanitized packet decoder checks and fuzzing
+tools/netfiles.py     Preserve/create local TFTP example files
 tools/mkdisk.py       Exclusive-create FAT32 image formatter; preserves existing files
 docs/                 Design notes, one per milestone
 linker.ld             Linker script (kernel loaded at 1 MiB)
