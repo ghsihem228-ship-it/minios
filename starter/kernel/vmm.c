@@ -197,29 +197,48 @@ int memory_selftest(void) {
     return 1;
 }
 
-/* One bounded user arena. Shared kernel mappings stay supervisor-only at leaves.
- * Parent U bits alone do not grant access to supervisor kernel leaves. */
+/* Each process owns four table frames. Low kernel tables and the kernel arena
+ * are shared, supervisor-only; user PDPT[1] and descendants are private. */
 #include "user_vm.h"
 #include "bytes.h"
-static uint64_t *user_pt;
-static uint64_t saved_user[USER_PAGES];
-static int snapshot;
-static int user_tables(void) {
-    if (user_pt) return 1;
-    uint64_t *slot = leaf(USER_BASE, 1);
-    if (!slot) return 0;
-    uint64_t *p = table(root_physical);
-    for (unsigned shift = 39; shift > 12; shift -= 9) {
-        unsigned index = (USER_BASE >> shift) & 511;
-        p[index] |= PTE_USER;
-        p = table(p[index] & ADDRESS_MASK);
+static struct user_space *selected_space;
+#define user_pt (selected_space ? table(selected_space->tables[3]) : NULL)
+#define saved_user (selected_space->saved)
+#define snapshot (selected_space->snapshot)
+int vm_space_create(struct user_space *space) {
+    bytes_zero(space, sizeof(*space));
+    for (unsigned i = 0; i < 4; i++) {
+        space->tables[i] = new_table();
+        if (!space->tables[i]) {
+            for (unsigned j = 0; j < i; j++) (void)pmm_free_table(space->tables[j]);
+            bytes_zero(space, sizeof(*space)); return 0;
+        }
     }
-    user_pt = slot;
+    uint64_t *root = table(space->tables[0]), *pdpt = table(space->tables[1]);
+    bytes_copy(root, table(root_physical), PAGE_SIZE);
+    bytes_copy(pdpt, table(root[0] & ADDRESS_MASK), PAGE_SIZE);
+    root[0] = space->tables[1] | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    pdpt[1] = space->tables[2] | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    table(space->tables[2])[0] = space->tables[3] | PTE_PRESENT | PTE_WRITE | PTE_USER;
     return 1;
+}
+void vm_space_select(struct user_space *space) { selected_space = space; }
+void vm_space_enter(void) {
+    __asm__ volatile ("mov %0, %%cr3" :: "r"(selected_space->tables[0]) : "memory");
+}
+void vm_space_kernel(void) {
+    __asm__ volatile ("mov %0, %%cr3" :: "r"(root_physical) : "memory");
+}
+void vm_space_destroy(struct user_space *space) {
+    struct user_space *prior = selected_space;
+    selected_space = space; vm_user_clear();
+    for (unsigned i = 0; i < 4; i++) if (space->tables[i]) (void)pmm_free_table(space->tables[i]);
+    bytes_zero(space, sizeof(*space));
+    selected_space = prior == space ? NULL : prior;
 }
 int vm_user_map(unsigned index, uint64_t flags) {
     if (index >= USER_PAGES || (flags & ~(PTE_WRITE | PTE_NX)) ||
-        ((flags & PTE_WRITE) && !(flags & PTE_NX)) || !user_tables() || user_pt[index]) return 0;
+        ((flags & PTE_WRITE) && !(flags & PTE_NX)) || !selected_space || user_pt[index]) return 0;
     uint64_t pa = pmm_alloc();
     if (!pa) return 0;
     zero_frame(pa);
@@ -232,7 +251,7 @@ void *vm_user_physical(unsigned index) {
     return table(user_pt[index] & ADDRESS_MASK);
 }
 int vm_snapshot_begin(void) {
-    if (snapshot || !user_pt) return 0;
+    if (!user_pt || snapshot) return 0;
     for (unsigned i = 0; i < USER_PAGES; i++) {
         saved_user[i] = user_pt[i];
         user_pt[i] &= ~PTE_WRITE;
@@ -241,7 +260,7 @@ int vm_snapshot_begin(void) {
     snapshot = 1; return 1;
 }
 int vm_user_cow(uint64_t address) {
-    if (!snapshot || address < USER_BASE || address >= USER_END) return 0;
+    if (!selected_space || !snapshot || address < USER_BASE || address >= USER_END) return 0;
     unsigned i = (address - USER_BASE) / PAGE_SIZE;
     if (!(saved_user[i] & PTE_WRITE) || (user_pt[i] & PTE_WRITE) ||
         (user_pt[i] & ADDRESS_MASK) != (saved_user[i] & ADDRESS_MASK)) return 0;
@@ -253,7 +272,7 @@ int vm_user_cow(uint64_t address) {
     invalidate(USER_BASE + i * PAGE_SIZE); return 1;
 }
 void vm_snapshot_end(int rollback) {
-    if (!snapshot) return;
+    if (!selected_space || !snapshot) return;
     for (unsigned i = 0; i < USER_PAGES; i++) {
         uint64_t old = saved_user[i] & ADDRESS_MASK, now = user_pt[i] & ADDRESS_MASK;
         if (old && old != now) {

@@ -1,5 +1,8 @@
 # Interactive console and file snapshots
 
+> Historical milestone: [milestone 15](15-processes.md) supersedes the single-runner
+> scheduling and CPU-state limits described here.
+
 ## Alternatives and recommendation
 
 For early interaction, UART-only I/O is simple and automatable but hides the

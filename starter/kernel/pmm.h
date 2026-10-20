@@ -6,7 +6,8 @@ enum frame_state { FRAME_RESERVED, FRAME_FREE, FRAME_OWNED, FRAME_TABLE, FRAME_M
 int pmm_init(const struct boot_memory *map, const struct phys_range *reserved, unsigned count);
 uint64_t pmm_alloc(void); /* Aligned physical address, or 0; contents unspecified. */
 int pmm_free(uint64_t physical); /* Only an owned, unmapped, non-table frame. */
-uint64_t pmm_alloc_table(void); /* Permanent table ownership for this address space. */
+uint64_t pmm_alloc_table(void); /* Page-table ownership; release only after detaching all references. */
+int pmm_free_table(uint64_t physical); /* Caller must detach and flush first. */
 int pmm_set_mapped(uint64_t physical, int mapped); /* Enforce one arena alias. */
 enum frame_state pmm_state(uint64_t physical);
 uint64_t pmm_free_count(void);

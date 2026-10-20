@@ -1,5 +1,8 @@
 # Step 10: validated ELF64 and real ring-3 execution
 
+> Historical milestone: [milestone 15](15-processes.md) supersedes the single-runner
+> scheduling and CPU-state limits described here.
+
 ## 1. Alternatives
 
 Flat binaries need little validation but have no reliable segment permissions.

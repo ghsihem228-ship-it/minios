@@ -2,7 +2,7 @@
 
 This is the current implementation contract. Earlier milestone notes describe
 historical versions. The calling convention is shared between kernel test callers
-and the real ring-3 runner, although extended resource calls require a live user
+and the isolated ring-3 processes, although extended resource calls require a live user
 context. Only INT 0x80 is implemented, not the SYSCALL instruction.
 
 RAX is the call number; arguments 0..5 are RDI, RSI, RDX, R10, R8, R9. Return RAX
@@ -61,8 +61,9 @@ handles. It does not implicitly transfer them to another user process.
 | -15 | EIO | disk snapshot I/O failed (kernel storage interface; no raw-disk syscall) |
 
 Loader/runner failures are trusted kernel API results rather than user syscalls:
-bad ELF returns EFORMAT, mapping exhaustion ENOSPC, a user fault `-1000-vector`,
-and the delivered-tick watchdog -2000. Unknown user call numbers always return
+bad ELF returns EFORMAT, frame/table allocation failure ENOMEM, process-pool
+exhaustion ENOSPC, a user fault `-1000-vector`, the delivered-tick watchdog -2000,
+and trusted kill -2001. Unknown user call numbers always return
 ENOSYS. Known calls reject reserved words before resource/pointer side effects.
 On ordinary failure the current context receives a bounded structured chain; on
 success it is cleared. ERROR_GET preserves it even on malformed getter queries.
@@ -77,8 +78,8 @@ access. No global-root/console/device/network acquisition syscall exists.
 
 Resource limits: 32 handles per context, eight 2048-byte RAM files and sixteen
 open descriptions per namespace, four pipe objects with four 136-byte frames each,
-one user runner, sixteen user page slots (14 loadable, one guard, one stack), one
-transaction. Open/unlink/handle and pipe effects are forbidden during a transaction;
+four isolated user processes, sixteen user page slots per process (14 loadable,
+one guard, one stack), and one globally exclusive filesystem transaction. Open/unlink/handle and pipe effects are forbidden during a transaction;
 read/write/seek, queries, commit/rollback and terminating exit remain allowed.
 
 There is no public process-creation syscall, kernel-pointer input, arbitrary
@@ -86,3 +87,9 @@ recipient selector, dynamic schema RPC, runtime exec or Linux-number compatibili
 Existing numbers/argument meanings must not be silently repurposed. Append new
 calls and increment minor for compatible extensions; incompatible evolution needs
 an explicitly designed major-version coexistence policy before a general release.
+
+Process scheduling and CPU state are specified in [milestone 15](15-processes.md).
+x87/MMX/XMM/MXCSR state is private across slices; transaction rollback restores
+its BEGIN checkpoint. AVX/XSAVE and TLS/FS/GS-base APIs are unsupported. Foreground
+`run` has a 200-slice watchdog; background jobs are controlled by the trusted shell.
+The user ABI still has no process-creation, PID control or raw address-space syscall.

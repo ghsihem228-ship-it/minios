@@ -16,7 +16,7 @@ BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
         b'PASS PMM: memory map, ownership, exhaustion/reuse\r\n'
         b'PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\r\n'
         b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
-READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\nMiniOS64 shell. Type help. Use save to keep files.\r\nx64> '
+READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS processes: private CR3, timer preemption, integer/x87/XMM state, kill/reap\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\nMiniOS64 shell. Type help. Use save to keep files.\r\nx64> '
 
 
 def symbols(image):

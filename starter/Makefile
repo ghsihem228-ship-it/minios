@@ -22,7 +22,7 @@ OBJS += build/error.o build/fs.o build/fs_test.o
 OBJS += build/object.o build/handle.o build/handle_test.o
 OBJS += build/scheduler.o build/switch.o
 OBJS += build/bootmem.o build/bootinfo.o build/pmm.o build/vmm.o build/memory_test.o
-USER_IMAGES = $(foreach n,0 1 2 3 4 5 6 7 8,build/user-$(n).elf)
+USER_IMAGES = $(foreach n,0 1 2 3 4 5 6 7 8 9 10 11,build/user-$(n).elf)
 FAULTS = 6 8 13 14 15 16 17 18 19 20 100 101
 FAULT_OBJS = $(foreach n,$(FAULTS),build/fault-$(n).o)
 FAULT_IMAGES = $(foreach n,$(FAULTS),build/fault-$(n).bin)
@@ -88,6 +88,7 @@ test: build/kernel.bin $(FAULT_IMAGES)
 	$(MAKE) test-host
 	python3 tests/test_shell.py --qemu "$(QEMU)"
 	python3 tests/test_store.py --qemu "$(QEMU)"
+	python3 tests/test_processes.py --qemu "$(QEMU)"
 
 build/test_memory: tests/test_memory.c kernel/bootmem.c kernel/pmm.c kernel/bootmem.h kernel/pmm.h
 	@mkdir -p build
@@ -163,9 +164,18 @@ build/user_mini.o: user/mini.c user/mini.h kernel/syscall_abi.h kernel/capabilit
 build/user_demo_%.o: user/demo.c user/mini.h kernel/syscall_abi.h
 	@mkdir -p build
 	$(CC) $(USER_CFLAGS) -DUSER_TEST=$* -c $< -o $@
+build/user-9.elf: build/probe-9.o user/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $<
+build/user-10.elf: build/probe-10.o user/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $<
+build/probe-%.o: user/concurrent.asm
+	@mkdir -p build
+	$(AS) -f elf64 -DPROBE=$* $< -o $@
 build/user-%.elf: build/user_demo_%.o build/user_mini.o build/user_start.o build/user_call.o user/linker.ld
 	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $(filter %.o,$^)
-build/user_blob.o: boot/user_blob.asm $(USER_IMAGES)
+build/user-%.embed.elf: build/user-%.elf
+	$(OBJCOPY) --strip-debug $< $@
+build/user_blob.o: boot/user_blob.asm $(USER_IMAGES:.elf=.embed.elf)
 	$(AS) -f elf64 $< -o $@
 
 build/test_extended: tests/test_extended.c kernel/store_wire.c kernel/fs.c kernel/fs_test.c kernel/vfs.c kernel/elf.c kernel/pipe.c kernel/error.c kernel/handle.c kernel/object.c $(wildcard kernel/*.h)
@@ -185,3 +195,8 @@ test-shell: build/kernel.bin
 test-store: build/kernel.bin
 	python3 tests/test_store.py --qemu "$(QEMU)"
 .PHONY: test-store
+
+# Live process tests need a linked kernel and the normal boot self-tests.
+test-processes: build/kernel.bin
+	python3 tests/test_processes.py --qemu "$(QEMU)"
+.PHONY: test-processes

@@ -1,5 +1,8 @@
 # Step 12: single-level COW process undo and RAMFS write staging
 
+> Historical milestone: [milestone 15](15-processes.md) supersedes the single-runner
+> scheduling and CPU-state limits described here.
+
 ## 1. Alternatives
 
 Eager memory/file copying makes rollback simple but costs the full working set at

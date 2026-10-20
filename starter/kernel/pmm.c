@@ -64,6 +64,12 @@ int pmm_free(uint64_t physical) {
     free_frames++;
     return 1;
 }
+int pmm_free_table(uint64_t physical) {
+    if (pmm_state(physical) != FRAME_TABLE) return 0;
+    frames[physical / PAGE_SIZE] = FRAME_FREE;
+    free_frames++;
+    return 1;
+}
 int pmm_set_mapped(uint64_t physical, int mapped) {
     if (pmm_state(physical) != (mapped ? FRAME_OWNED : FRAME_MAPPED)) return 0;
     frames[physical / PAGE_SIZE] = mapped ? FRAME_MAPPED : FRAME_OWNED;

@@ -37,6 +37,8 @@ x64> write note hello
 x64> cat note
 x64> save
 x64> run demo
+x64> spawn spin
+x64> ps
 ```
 
 Both run targets create a dedicated 1 MiB disk at `disks/minios64.img` if absent.
@@ -93,12 +95,14 @@ the later guides and [current ABI](docs/abi-v1.md) supersede earlier API version
 | 12 | [COW memory rollback and staged existing-file writes](docs/12-transactions.md) |
 | 13 | [Typed, bounded message pipes](docs/13-typed-pipes.md) |
 | 14 | [Interactive console and durable file snapshots](docs/14-console-storage.md) |
+| 15 | [Isolated, timer-preempted user processes](docs/15-processes.md) |
 
 ## Tests and source layout
 
 ```bash
 make test            # complete QEMU regressions plus all host sanitizer/model tests
 make test-extended   # new host parser/storage tests and actual ring-3 integration
+make test-processes  # concurrent ring-3 programs, live CR3 checks, kill and cleanup
 make test-host       # all host tests; builds its own user ELF fixture
 make -j2 test        # parallel compilation, same validation
 ```
@@ -106,7 +110,8 @@ make -j2 test        # parallel compilation, same validation
 The complete suite boots at 2/16/64/128/512 MiB; verifies IDT/TSS/PIC, page-table
 ownership and kernel protections; exercises real CPU faults, NMI, boot metadata
 and module reservation; and checks that process cleanup frees frames and handles.
-It runs nine built user ELF fixtures, repeating the main demo. Those cover actual
+It runs ten C user ELF fixtures plus two CPU-bound assembly probes, repeating
+the main demo. Those cover actual
 CPL3 syscalls, denied kernel/code writes, NX stack, denied port I/O/privileged INT,
 spinning timeout, zero-authority launch and pending-transaction abort. Kernel tasks
 also exchange typed messages through explicitly delegated read/write endpoints.
@@ -126,8 +131,9 @@ docs/                design/specification for each milestone, current syscall AB
 
 ## Boundaries that matter
 
-- Single CPU and one user runner at a time. Kernel tasks remain trusted/cooperative;
-  there is no concurrent per-process CR3 scheduler, SMP or FPU/TLS context support.
+- Single CPU, four isolated user processes with timer preemption and x87/XMM
+  state preservation. Kernel tasks remain trusted/cooperative. There is no SMP,
+  thread API, TLS or AVX support.
 - RAMFS has explicit whole-filesystem disk snapshots. Moving filesystems,
   networking and most drivers to user services is still needed for the hybrid goal.
 - The shell runs embedded ELF programs; there is no runtime disk exec or general Unix binary support.

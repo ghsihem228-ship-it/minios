@@ -110,7 +110,7 @@ static void allocator(void) {
     assert(pmm_free_count() == free);
     assert(pmm_state(PHYS_LIMIT) == FRAME_RESERVED && !pmm_free(PHYS_LIMIT));
     for (unsigned iteration = 0; iteration < 50000; iteration++) {
-        unsigned op = random32() % 6, n = random32() % MODEL_FRAMES;
+        unsigned op = random32() % 7, n = random32() % MODEL_FRAMES;
         uint64_t pa = n * PAGE_SIZE;
         if (op < 3) {
             int table = op == 2;
@@ -127,6 +127,10 @@ static void allocator(void) {
             int expected = model[n] == FRAME_OWNED;
             assert(pmm_free(pa) == expected);
             if (expected) { model[n] = FRAME_FREE; free++; }
+        } else if (op == 6) {
+            int expected = model[n] == FRAME_TABLE;
+            assert(pmm_free_table(pa) == expected);
+            if (expected) { model[n] = FRAME_FREE; free++; }
         } else {
             int mapped = op == 4;
             int expected = model[n] == (mapped ? FRAME_OWNED : FRAME_MAPPED);
@@ -134,7 +138,7 @@ static void allocator(void) {
             if (expected) model[n] = mapped ? FRAME_MAPPED : FRAME_OWNED;
         }
         assert(pmm_free_count() == free);
-        assert(!pmm_free(pa + 1));
+        assert(!pmm_free(pa + 1) && !pmm_free_table(pa + 1));
     }
     uint64_t remaining = free, allocated = 0, address;
     while ((address = pmm_alloc())) {

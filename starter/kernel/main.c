@@ -76,6 +76,11 @@ void kernel_main(uint32_t boot_info) {
         (void)serial_write("ERROR: userspace self-test "); (void)serial_write(number); (void)serial_write("\n");
         for (;;) __asm__ volatile ("cli; hlt");
     }
+    if (!user_process_selftest()) {
+        (void)serial_write("ERROR: isolated user-process self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS processes: private CR3, timer preemption, integer/x87/XMM state, kill/reap\n");
     (void)serial_write("PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
     shell_run();

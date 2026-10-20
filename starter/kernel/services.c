@@ -1,7 +1,7 @@
 #include "process.h"
 #include "user_vm.h"
 #include "pipe.h"
-static struct interrupt_frame transaction_frame;
+
 static int64_t output_range(uint64_t address, size_t length) {
     if (!vm_user_check(address, length, 1)) return SYS_EFAULT;
     return vm_user_prepare(address, length) ? SYS_OK : SYS_ENOMEM;
@@ -50,13 +50,17 @@ int services_dispatch(struct interrupt_frame *f, struct syscall_result *result) 
         if (!correct) { status = SYS_EACCESS; goto done; }
         if (!vm_snapshot_begin()) { status = SYS_EBUSY; goto done; }
         if (!fs_tx_begin(user_context.filesystem)) { vm_snapshot_end(1); status = SYS_EBUSY; goto done; }
-        transaction_frame = *f; user_context.transaction = 1; status = SYS_OK;
+        __asm__ volatile ("fxsave64 %0" : "=m"(user_context.transaction_fx) :: "memory");
+        user_context.transaction_frame = *f; user_context.transaction = 1; user_context.deadline = timer_now(); status = SYS_OK;
     } else if (number == SYS_TX_COMMIT || number == SYS_TX_ROLLBACK) {
         if (!user_context.transaction) { status = SYS_EINVAL; goto done; }
         int rollback = number == SYS_TX_ROLLBACK;
         if (!fs_tx_end(user_context.filesystem, rollback)) { status = SYS_ECONFLICT; goto done; }
         vm_snapshot_end(rollback); user_context.transaction = 0;
-        if (rollback) { *f = transaction_frame; result->value = 1; }
+        if (rollback) {
+            *f = user_context.transaction_frame; result->value = 1;
+            __asm__ volatile ("fxrstor64 %0" :: "m"(user_context.transaction_fx) : "memory");
+        }
         status = SYS_OK;
     } else if (number == SYS_PIPE_CREATE) {
         handle_t ends[2];

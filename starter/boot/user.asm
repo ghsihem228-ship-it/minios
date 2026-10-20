@@ -1,8 +1,9 @@
 BITS 64
 section .text
-global user_enter, user_return
+global user_return
 extern user_host_sp, user_host_flags
-user_enter:
+global user_resume
+user_resume:
     push rbp
     push rbx
     push r12
@@ -12,30 +13,30 @@ user_enter:
     pushfq
     pop qword [rel user_host_flags]
     mov [rel user_host_sp], rsp
-    ; Entry only uses explicit capabilities. Erase other caller register contents.
-    push qword 0x33
-    push rsi
-    push qword 0x202
-    push qword 0x2b
-    push rdi
-    mov rdi, rdx
     mov ax, 0x33
     mov ds, ax
     mov es, ax
     xor eax, eax
-    xor ebx, ebx
-    xor ecx, ecx
-    xor edx, edx
-    xor ebp, ebp
-    xor esi, esi
-    xor r8d, r8d
-    xor r9d, r9d
-    xor r10d, r10d
-    xor r11d, r11d
-    xor r12d, r12d
-    xor r13d, r13d
-    xor r14d, r14d
-    xor r15d, r15d
+    mov fs, ax
+    mov gs, ax
+    ; Read only trusted saved frames; user code never supplies CS/RFLAGS here.
+    mov rsp, rdi
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 16
     iretq
 user_return:
     mov dx, 0x10

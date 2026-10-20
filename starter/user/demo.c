@@ -19,12 +19,13 @@ int user_main(uint64_t root) {
         int missing = open("demo", O_RDONLY);
         return missing == -1 && errno == 9 ? 0 : 94;
     }
-    if (USER_TEST == 7) {
+    if (USER_TEST == 7 || USER_TEST == 11) {
         int opened = open("demo", O_RDWR);
         CHECK(opened >= 0, 95);
         struct syscall_result tx = syscall_invoke(SYS_TX_BEGIN, root, 0, 0, 0, 0, 0);
         CHECK(!tx.status, 96);
         CHECK(write(opened, "aborted", 7) == 7, 97);
+        if (USER_TEST == 11) for (;;) __asm__ volatile ("pause");
         return 0; /* pending transaction must abort on exit */
     }
     if (USER_TEST == 8) { *(volatile uint64_t *)(uintptr_t)0x40000000 = 42; return 98; }
@@ -50,14 +51,21 @@ int user_main(uint64_t root) {
     CHECK(!r.status && r.value == CAP_WRITE, 10);
     CHECK(close(reader) == 0 && lseek(fd, 0, SEEK_SET) == 0, 11);
     volatile uint64_t marker = 7;
+    uint64_t fp_marker;
+    const uint16_t fp_before = 0x37f, fp_after = 0x77f;
+    uint16_t fp_control;
+    __asm__ volatile ("movq %0, %%xmm0; fldcw %1" :: "r"(UINT64_C(0x123456789abcdef0)), "m"(fp_before) : "memory");
     r = syscall_invoke(SYS_TX_BEGIN, root, 0, 0, 0, 0, 0);
     CHECK(!r.status, 12);
     if (!r.value) {
         marker = 9;
+        __asm__ volatile ("pxor %%xmm0, %%xmm0; fldcw %0" :: "m"(fp_after) : "memory");
         CHECK(write(fd, "after!", 6) == 6, 13);
         r = syscall_invoke(SYS_TX_ROLLBACK, 0, 0, 0, 0, 0, 0);
         return 14; /* rollback resumes the BEGIN call, never this line */
     }
+    __asm__ volatile ("movq %%xmm0, %0; fnstcw %1" : "=r"(fp_marker), "=m"(fp_control) :: "memory");
+    CHECK(fp_marker == UINT64_C(0x123456789abcdef0) && fp_control == fp_before, 28);
     CHECK(marker == 7 && read(fd, data, 6) == 6 && equal(data, "before", 6), 15);
     CHECK(lseek(fd, 0, SEEK_SET) == 0, 16);
     r = syscall_invoke(SYS_TX_BEGIN, root, 0, 0, 0, 0, 0);

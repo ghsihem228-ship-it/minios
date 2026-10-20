@@ -40,3 +40,22 @@ independent image decoding, fallback from a damaged newer snapshot, and refusal
 to modify unrecoverably corrupt/unknown images. Storage tests use temporary
 images exclusively. This does not establish physical power-loss safety or native
 Windows GUI compatibility; the latter helper has only been reviewed here.
+
+## Isolated user-process dispatcher (2026-10-20)
+
+`make test` includes multi-RAM boot checks at 2/16/64/128/512 MiB, the original
+exception/protection cases, all host sanitizer suites, shell/storage checks and
+new process integration at 16/64 MiB. Non-yielding assembly probes preserve
+independent memory markers, integer registers, x87 control/data and XMM state.
+Live QMP page walks independently verify distinct CR3 roots and physical data
+frames with expected RX/RW-NX and supervisor kernel permissions. Tests cover pool
+exhaustion/reuse, invalid/stale/overflowed PIDs, kill, faults, foreground execution
+alongside background jobs and full frame/table reclamation. Boot checks at small
+RAM sizes force zero through six free physical frames to exercise partial process
+load rollback. The independent PMM model includes table-frame release operations.
+
+Transaction demos check XMM/x87 checkpoint restoration. A background transaction
+that writes a staged file and then spins must hit its separate watchdog, abort
+its file changes, leave other jobs alive and release its resources. Kernel
+scheduler checks at 16/64/128 MiB also remain required. This does not establish
+SMP safety, a public process-control ABI, blocking IPC or production readiness.

@@ -77,11 +77,29 @@ static void execute(char *line) {
         }
         return;
     }
-    if (same(command, "run")) {
-        static const char *const programs[] = {"demo", "fault", "io", "spin", "nx", "interrupt", "empty", "abort", "readonly"};
+    if (same(command, "kill")) {
+        uint64_t pid = 0;
+        if (!name || !*name || *rest) { say("Usage: kill <pid>\n"); return; }
+        for (char *c = name; *c; c++) {
+            if (*c < '0' || *c > '9' || pid > (UINT64_MAX - (unsigned)(*c - '0')) / 10) {
+                say("Invalid process ID\n"); return;
+            }
+            pid = pid * 10 + (unsigned)(*c - '0');
+        }
+        int64_t status = user_kill(pid); result(status);
+        if (!status) say("Killed process\n");
+        return;
+    }
+    if (same(command, "run") || same(command, "spawn")) {
+        static const char *const programs[] = {"demo", "fault", "io", "spin", "nx", "interrupt", "empty", "abort", "readonly", "probe-a", "probe-b", "txspin"};
         unsigned i;
-        for (i = 0; i < 9; i++) if (name && same(name, programs[i])) break;
-        if (i == 9 || *rest) { say("Usage: run demo|fault|io|spin|nx|interrupt|empty|abort|readonly\n"); return; }
+        for (i = 0; i < 12; i++) if (name && same(name, programs[i])) break;
+        if (i == 12 || *rest) { say("Usage: run demo|fault|io|spin|nx|interrupt|empty|abort|readonly|probe-a|probe-b|txspin\n"); return; }
+        if (same(command, "spawn")) {
+            uint64_t pid; int64_t status = user_demo_spawn(i, &pid); result(status);
+            if (!status) { say("Spawned pid="); number(pid); say("\n"); }
+            return;
+        }
         say("Running "); say(programs[i]); say("\n");
         int64_t status = user_demo_run(i);
         say("[exit] "); if (status < 0) say("-");
@@ -90,7 +108,7 @@ static void execute(char *line) {
     }
     if (name) { say("Unexpected arguments\n"); return; }
     if (same(command, "help")) {
-        say("MiniOS64 commands:\nhelp clear version mem uptime ls disk save\ncat <name> | write <name> <text> | rm <name>\nprograms | run <program>\n");
+        say("MiniOS64 commands:\nhelp clear version mem uptime ls disk save\ncat <name> | write <name> <text> | rm <name>\nprograms | run <program> | spawn <program> | ps | kill <pid>\n");
         say("Use save to persist files on a dedicated disk. Names are relative; no slash or dot-dot.\n");
     } else if (same(command, "version")) say("MiniOS64 x86_64 experimental kernel; ABI 1.2\n");
     else if (same(command, "clear")) console_clear();
@@ -103,7 +121,14 @@ static void execute(char *line) {
         int64_t status = store_save(filesystem); result(status);
         if (!status) { say("Saved snapshot="); number(store_sequence()); say("\n"); }
     }
-    else if (same(command, "programs")) say("demo fault io spin nx interrupt empty abort readonly\n");
+    else if (same(command, "ps")) {
+        unsigned count = 0; struct user_info info;
+        for (unsigned i = 0; i < USER_PROCESSES; i++) if (user_info(i, &info)) {
+            say("pid="); number(info.pid); say(" ready slices="); number(info.slices); say("\n"); count++;
+        }
+        if (!count) say("(no user processes)\n");
+    }
+    else if (same(command, "programs")) say("demo fault io spin nx interrupt empty abort readonly probe-a probe-b txspin\n");
     else if (same(command, "ls")) {
         unsigned count = 0;
         for (unsigned i = 0; i < FS_FILES; i++) {
@@ -124,6 +149,20 @@ _Noreturn void shell_run(void) {
     char line[LINE]; unsigned used = 0, overflow = 0;
     say("MiniOS64 shell. Type help. Use save to keep files.\nx64> ");
     for (;;) {
+        user_poll();
+        /* Reap completed background jobs after resources were released off-stack.
+         * Retain a termination message; process IDs are never reused. */
+        struct user_info info;
+        for (unsigned i = 0; i < USER_PROCESSES; i++) {
+            if (user_info(i, &info) && info.state == USER_EXITED) {
+                int64_t code; (void)user_reap(info.pid, &code);
+                say("\n[process "); number(info.pid); say("] exit=");
+                if (code < 0) say("-");
+                number(code < 0 ? UINT64_C(0) - (uint64_t)code : (uint64_t)code);
+                say("\nx64> ");
+                line[used] = 0; say(line);
+            }
+        }
         int c = console_input();
         if (c < 0) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); continue; }
         if (c == '\t') c = ' ';

@@ -8,10 +8,11 @@ This is a working educational kernel, not a completed desktop or production OS.
 The following work remains; none of these items is satisfied by boot PASS lines.
 Each milestone needs implementation, negative tests and a reviewed ABI contract.
 
-1. **Concurrent isolated user processes.** Per-process page tables, process/thread
-   lifecycle and wait/kill, timer-preempted context switching, safe kernel entry,
-   FPU/SIMD and TLS state, ownership/accounting, and clean exit/fault recovery.
-   Verify two CPU-bound tasks progress and identical virtual addresses stay private.
+1. **Extend the process foundation.** Private CR3 roots, timer-preempted user
+   execution, x87/XMM state, trusted launch/kill/reap and cleanup are implemented
+   in [milestone 15](15-processes.md). Still needed: capability-based public process
+   handles/syscalls, threads, blocking waits/sleep, startup arguments, TLS, richer
+   resource accounting and kernel-thread integration.
 2. **Service IPC and waits.** Blocking channels/wait sets, endpoint closure,
    backpressure, handle transfer with rights attenuation, cancellation, quotas
    and process-local authority. Typed message validation already exists but is
@@ -42,5 +43,5 @@ Each milestone needs implementation, negative tests and a reviewed ABI contract.
    compatibility negotiation and long-term ABI tests. The current small ABI is
    documented; do not manufacture placeholder syscalls to reach a call count.
 
-Near-term priority: isolated concurrent user processes, followed by user-service
-IPC. These are prerequisites for safely growing the requested hybrid architecture.
+Near-term priority: capability-based process handles and user-service IPC with
+wait/closure semantics. These support the requested hybrid architecture.

@@ -181,8 +181,7 @@ void interrupt_dispatch(struct interrupt_frame *f) {
         }
         if (irq >= 8) out8(0xa0, 0x20);
         out8(0x20, 0x20);     /* EOI after service, slave before master. */
-        if (!irq && user_context.active && (f->cs & 3) == 3 && timer_ticks - user_context.deadline >= 200)
-            user_finish(f, -2000);
+        if (!irq) user_tick(f);
         return;
     }
     if (user_fault(f)) return;
