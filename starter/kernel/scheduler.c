@@ -16,6 +16,8 @@ struct task {
 };
 static struct task tasks[TASKS];
 static unsigned current;
+static struct handle_table task_handles[TASKS];
+struct handle_table *task_handle_table(void) { return &task_handles[current]; }
 /* Slot zero uses the existing bootstrap stack. No allocator dependency. */
 static uint64_t stacks[TASKS - 1][STACK_SIZE / 8] __attribute__((aligned(16)));
 extern void context_switch(uintptr_t *old_sp, uintptr_t new_sp);
@@ -59,6 +61,7 @@ static _Noreturn void task_start(void) {
 void scheduler_init(void) {
     /* Call exactly once, after interrupts_init, with IF=0. */
     current = 0;
+    for (unsigned i = 0; i < TASKS; i++) handle_table_init(&task_handles[i]);
     tasks[0].state = RUNNING;
 }
 int task_create(void (*entry)(void *), void *argument) {
@@ -99,6 +102,7 @@ void task_sleep(uint64_t ticks) {
 _Noreturn void task_exit(void) {
     (void)irq_save();
     if (!current) bug();
+    handle_table_clear(task_handle_table());
     tasks[current].state = ZOMBIE;
     schedule();
     bug(); /* ZOMBIE contexts must never be resumed. */
@@ -113,12 +117,29 @@ unsigned task_live_count(void) {
 }
 
 /* Integration checks use real stacks, timer interrupts and returning entries. */
-static unsigned progress[2], failed;
+static unsigned progress[2], failed, handle_destroyed;
+static struct object worker_objects[2];
+static void worker_destroy(struct object *o) { (void)o; handle_destroyed++; }
 static void worker(void *argument) {
     unsigned index = (unsigned)(uintptr_t)argument;
+    handle_t handle;
+    struct object *object = &worker_objects[index];
+    if (object_init(object, OBJECT_TEST, worker_destroy) != OBJ_OK ||
+        handle_install(task_handle_table(), object, &handle) != OBJ_OK) {
+        failed = 1;
+        return;
+    }
+    object_put(object); /* task's handle now owns the only reference */
     volatile uint64_t local = UINT64_C(0x123456789abcdef0) + index;
     for (unsigned i = 0; i < 12; i++) {
         if (local != UINT64_C(0x123456789abcdef0) + index) failed = 1;
+        struct object *pin;
+        if (handle_lookup(task_handle_table(), handle, OBJECT_TEST, &pin) != OBJ_OK)
+            failed = 1;
+        else {
+            if (pin != object) failed = 1;
+            object_put(pin);
+        }
         progress[index]++;
         task_sleep(0); /* zero-duration sleep is a yield */
         uint64_t start = timer_now();
@@ -139,7 +160,7 @@ int scheduler_selftest(void) {
         __asm__ volatile ("sti; hlt" ::: "memory");
     }
     task_yield(); /* reap final zombie on a different stack */
-    if (failed || progress[0] != 12 || progress[1] != 12) return 0;
+    if (failed || progress[0] != 12 || progress[1] != 12 || handle_destroyed != 2) return 0;
     for (unsigned round = 0; round < 16; round++) {
         for (unsigned i = 1; i < TASKS; i++)
             if (task_create(returning_worker, 0) < 0) return 0;

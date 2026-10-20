@@ -45,6 +45,11 @@ void kernel_main(uint32_t boot_info) {
         for (;;) __asm__ volatile ("cli; hlt");
     }
     (void)serial_write("PASS scheduler: yield, sleep, exit, capacity, reuse\n");
+    if (!handle_selftest()) {
+        (void)serial_write("ERROR: handle self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS handles: types, references, stale tokens, capacity, retirement\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
     /* Bootstrap is the idle task. IRQ handlers never invoke the scheduler. */
     for (;;) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); }

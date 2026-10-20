@@ -11,6 +11,7 @@ CFLAGS = -m64 -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-pie \
 QEMU_FLAGS = -machine pc -cpu qemu64 -m 64 -accel tcg -display none \
              -serial stdio -monitor none -nic none -no-reboot -no-shutdown
 OBJS = build/entry.o build/interrupt_stubs.o build/main.o build/serial.o build/interrupts.o
+OBJS += build/object.o build/handle.o build/handle_test.o
 OBJS += build/scheduler.o build/switch.o
 OBJS += build/bootmem.o build/bootinfo.o build/pmm.o build/vmm.o build/memory_test.o
 FAULTS = 6 8 13 14 15 16 17 18 19 20 100 101
@@ -66,8 +67,9 @@ build/test_memory: tests/test_memory.c kernel/bootmem.c kernel/pmm.c kernel/boot
 	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -fsanitize=address,undefined \
 	    -fno-omit-frame-pointer -fno-pie -no-pie tests/test_memory.c kernel/bootmem.c kernel/pmm.c -o $@
 
-test-host: build/test_memory
+test-host: build/test_memory build/test_handle
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_memory
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_handle
 
 clean:
 	rm -rf build
@@ -79,3 +81,15 @@ clean:
 test-scheduler: build/kernel.bin
 	python3 tests/test_scheduler.py --qemu "$(QEMU)"
 .PHONY: test-scheduler
+
+build/test_handle: tests/test_handle.c kernel/object.c kernel/handle.c kernel/handle_test.c kernel/object.h kernel/handle.h
+	@mkdir -p build
+	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -DOBJECT_HOST_TEST \
+	    -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie \
+	    tests/test_handle.c kernel/object.c kernel/handle.c kernel/handle_test.c -o $@
+
+test-handles: build/kernel.bin build/test_handle
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_handle
+	python3 tests/test_scheduler.py --qemu "$(QEMU)"
+
+.PHONY: test-handles

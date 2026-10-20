@@ -16,7 +16,7 @@ BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
         b'PASS PMM: memory map, ownership, exhaustion/reuse\r\n'
         b'PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\r\n'
         b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
-READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'READY: interrupts enabled; idle\r\n'
+READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'READY: interrupts enabled; idle\r\n'
 
 
 def symbols(image):

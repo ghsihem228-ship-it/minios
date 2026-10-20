@@ -1,3 +1,22 @@
+# Step 5: kernel handle/object manager
+
+Read [the step-5 design, specification, working-code guide and tests](docs/05-handles.md).
+The starter now has reference-counted typed objects, 32 generation-checked handles
+per task, duplicate/lookup/close, and automatic task-exit cleanup. These are private
+kernel APIs; syscalls and capability enforcement come later.
+
+```bash
+make
+make test-handles
+make test
+make run
+```
+
+Boot now also prints `PASS handles: types, references, stale tokens, capacity, retirement`
+before READY. Earlier milestone instructions below remain subsystem references.
+
+---
+
 # Step 4: cooperative kernel scheduler
 
 Read [the scheduler design, API, code guide, tests and risks](docs/04-scheduler.md).
