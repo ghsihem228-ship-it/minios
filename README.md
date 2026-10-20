@@ -2,7 +2,7 @@
 
 A small x86 operating system kernel written from scratch in C and assembly, built to learn how an OS really works.
 
-For the independent **C/x86_64 step-1 restart**, use [starter/README.md](starter/README.md).
+For the independent **C/x86_64 incremental restart (now step 2: interrupts)**, use [starter/README.md](starter/README.md).
 Run its commands from `starter/`; the root Makefile continues to build MiniOS i386.
 
 ## Goals

@@ -1,15 +1,7 @@
 #include "serial.h"
-#include <stdint.h>
+#include "io.h"
 #define COM1 0x3F8u
 #define TX_POLLS 100000u
-static inline void out8(uint16_t port, uint8_t value) {
-    __asm__ volatile ("outb %0, %1" :: "a"(value), "Nd"(port) : "memory");
-}
-static inline uint8_t in8(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port) : "memory");
-    return value;
-}
 void serial_init(void) {
     out8(COM1 + 1, 0);     /* UART interrupts disabled. */
     out8(COM1 + 3, 0x80);  /* DLAB: access the baud divisor. */

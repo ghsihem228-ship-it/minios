@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot the actual flat Multiboot image; check serial and CPU mode via QMP."""
+"""Exercise real x86_64 exception entry/return and PIC/PIT interrupts in QEMU."""
 import argparse
 import json
 from pathlib import Path
@@ -11,10 +11,20 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
+        b'PASS INT3/IRQ0: 64-bit GPRs, DF/IF, IRETQ; spurious IRQ7/15\r\n'
+        b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
+READY = BOOT + b'READY: interrupts enabled; idle\r\n'
 
 
-def image_check():
-    data = (ROOT / 'build/kernel.bin').read_bytes()
+def symbols(image):
+    output = subprocess.check_output(['nm', '-n', str(image.with_suffix('.elf'))], text=True)
+    return {parts[2]: int(parts[0], 16) for line in output.splitlines()
+            if len(parts := line.split()) == 3}
+
+
+def image_check(image):
+    data = image.read_bytes()
     offset = next((n for n in range(0, min(8192, len(data)) - 31, 4)
                    if struct.unpack_from('<I', data, n)[0] == 0x1BADB002), None)
     assert offset is not None, 'Missing early, aligned Multiboot header'
@@ -26,76 +36,218 @@ def image_check():
     assert not bss_end % 4096
 
 
-def boot(qemu, ram, cpu, marker, long_mode):
-    with tempfile.TemporaryDirectory(prefix='kernel-step1-') as folder:
-        folder = Path(folder)
-        serial = folder / 'serial.log'
-        endpoint = folder / 'qmp'
-        with (folder / 'qemu.log').open('w+') as log:
-            p = subprocess.Popen([qemu, '-machine', 'pc', '-cpu', cpu, '-m', str(ram),
-                '-accel', 'tcg', '-display', 'none', '-serial', f'file:{serial}',
-                '-monitor', 'none', '-nic', 'none', '-no-reboot', '-no-shutdown',
-                '-qmp', f'unix:{endpoint},server=on,wait=off',
-                '-kernel', str(ROOT / 'build/kernel.bin')], stdout=log, stderr=log)
+class VM:
+    def __init__(self, qemu, image, ram=64, cpu='qemu64'):
+        self.image = image
+        self.folder_handle = tempfile.TemporaryDirectory(prefix='kernel-step2-')
+        self.folder = Path(self.folder_handle.name)
+        self.serial = self.folder / 'serial.log'
+        self.endpoint = self.folder / 'qmp'
+        self.log = (self.folder / 'qemu.log').open('w+')
+        self.socket = self.stream = self.process = None
+        self.process = subprocess.Popen([
+            qemu, '-machine', 'pc', '-cpu', cpu, '-m', str(ram), '-accel', 'tcg',
+            '-display', 'none', '-serial', f'file:{self.serial}', '-monitor', 'none',
+            '-nic', 'none', '-no-reboot', '-no-shutdown',
+            '-qmp', f'unix:{self.endpoint},server=on,wait=off', '-kernel', str(image)
+        ], stdout=self.log, stderr=self.log)
+
+    def output(self):
+        return self.serial.read_bytes() if self.serial.exists() else b''
+
+    def wait_for(self, marker):
+        deadline = time.monotonic() + 10
+        while marker not in self.output() or not self.endpoint.exists():
+            if self.process.poll() is not None or time.monotonic() >= deadline:
+                self.log.seek(0)
+                raise AssertionError(f'VM failed: serial={self.output()!r}; {self.log.read()}')
+            time.sleep(.01)
+
+    def connect(self):
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.socket.settimeout(5)
+        self.socket.connect(str(self.endpoint))
+        self.stream = self.socket.makefile('rwb', buffering=0)
+        assert 'QMP' in json.loads(self.stream.readline())
+        self.qmp('qmp_capabilities')
+
+    def qmp(self, name, **args):
+        self.stream.write((json.dumps({'execute': name, 'arguments': args}) + '\n').encode())
+        while True:
+            reply = json.loads(self.stream.readline())
+            assert 'error' not in reply, reply
+            if 'return' in reply:
+                return reply['return']
+
+    def registers(self):
+        return self.qmp('human-monitor-command', **{'command-line': 'info registers'})
+
+    def memory(self, address, size):
+        path = self.folder / 'memory.bin'
+        self.qmp('pmemsave', val=address, size=size, filename=str(path))
+        data = path.read_bytes()
+        assert len(data) == size
+        return data
+
+    def close(self):
+        if self.stream:
+            self.stream.close()
+        if self.socket:
+            self.socket.close()
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
             try:
-                deadline = time.monotonic() + 10
-                while True:
-                    output = serial.read_bytes() if serial.exists() else b''
-                    if marker in output and endpoint.exists():
-                        break
-                    if p.poll() is not None or time.monotonic() >= deadline:
-                        log.seek(0)
-                        raise AssertionError(f'Boot failed: serial={output!r}; {log.read()}')
-                    time.sleep(.02)
-                with socket.socket(socket.AF_UNIX) as s:
-                    s.settimeout(5)
-                    s.connect(str(endpoint))
-                    with s.makefile('rwb', buffering=0) as stream:
-                        assert 'QMP' in json.loads(stream.readline())
-                        def qmp(name, **args):
-                            stream.write((json.dumps({'execute': name, 'arguments': args}) + '\n').encode())
-                            while True:
-                                reply = json.loads(stream.readline())
-                                assert 'error' not in reply, reply
-                                if 'return' in reply:
-                                    return reply['return']
-                        qmp('qmp_capabilities')
-                        registers = qmp('human-monitor-command', **{'command-line': 'info registers'})
-                        flags = re.search(r'\b(?:RFL|EFL)=([0-9a-fA-F]+)', registers)
-                        assert flags and not int(flags.group(1), 16) & (1 << 9), registers
-                        efer = re.search(r'\bEFER=([0-9a-fA-F]+)', registers)
-                        if long_mode:
-                            assert efer and int(efer.group(1), 16) & 0x500 == 0x500, registers
-                            cr0 = int(re.search(r'\bCR0=([0-9a-fA-F]+)', registers).group(1), 16)
-                            cr3 = int(re.search(r'\bCR3=([0-9a-fA-F]+)', registers).group(1), 16)
-                            cr4 = int(re.search(r'\bCR4=([0-9a-fA-F]+)', registers).group(1), 16)
-                            assert cr0 & (1 << 31) and cr4 & (1 << 5), registers
-                            assert cr3 and not cr3 % 4096, registers
-                        else:
-                            assert not efer or not int(efer.group(1), 16) & (1 << 10), registers
-                        # Catch immediate reset/fault loops after the first characters appeared.
-                        time.sleep(.05)
-                        assert serial.read_bytes() == marker, serial.read_bytes()
-                        assert qmp('query-status')['running'], 'VM stopped after serial output'
-            finally:
-                if p.poll() is None:
-                    p.terminate()
-                    try:
-                        p.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        p.kill(); p.wait()
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+        self.log.close()
+        self.folder_handle.cleanup()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def reg(text, name):
+    match = re.search(r'\b' + name + r'=([0-9a-fA-F]+)', text)
+    assert match, text
+    return int(match[1], 16)
+
+
+def check_long_mode(registers):
+    assert reg(registers, 'EFER') & 0x500 == 0x500, registers
+    assert reg(registers, 'CR0') & (1 << 31), registers
+    assert reg(registers, 'CR4') & (1 << 5), registers
+    assert reg(registers, 'CR3') and not reg(registers, 'CR3') % 4096, registers
+
+
+def check_tables(vm, names, registers):
+    # Validate all runtime gates, not merely the source's table initializer.
+    gates = vm.memory(names['idt'], 4096)
+    for n in range(256):
+        low, cs, ist, attr, middle, high, reserved = struct.unpack_from('<HHBBHII', gates, n * 16)
+        assert low | (middle << 16) | (high << 32) == names[f'isr_{n}'], n
+        assert cs == 8 and attr == 0x8e and reserved == 0, n
+        assert ist == {8: 1, 2: 2, 18: 3}.get(n, 0), n
+    assert re.search(rf'IDT=\s*{names["idt"]:016x}\s+00000fff', registers), registers
+    assert re.search(rf'TR =0018\s+{names["tss"]:016x}\s+00000067', registers), registers
+    tss = vm.memory(names['tss'], 104)
+    for i, stack in enumerate(('df_stack', 'nmi_stack', 'mc_stack')):
+        assert struct.unpack_from('<Q', tss, 36 + i * 8)[0] == names[stack] + 16384
+    assert struct.unpack_from('<H', tss, 102)[0] == 104
+    pic = vm.qmp('human-monitor-command', **{'command-line': 'info pic'})
+    assert re.search(r'pic0:.*imr=fe', pic) and re.search(r'pic1:.*imr=ff', pic), pic
+
+
+def boot(qemu, ram):
+    image = ROOT / 'build/kernel.bin'
+    names = symbols(image)
+    with VM(qemu, image, ram) as vm:
+        vm.wait_for(READY)
+        vm.connect()
+        # Freeze only for inspection. In idle IF should be 1; retry if sampled in ISR.
+        for _ in range(10):
+            vm.qmp('stop')
+            registers = vm.registers()
+            if reg(registers, '(?:RFL|EFL)') & (1 << 9):
+                break
+            vm.qmp('cont')
+            time.sleep(.01)
+        else:
+            raise AssertionError('Maskable interrupts never enabled')
+        check_long_mode(registers)
+        check_tables(vm, names, registers)
+        first, = struct.unpack('<Q', vm.memory(names['timer_ticks'], 8))
+        assert first >= 3
+        vm.qmp('cont')
+        time.sleep(.12)
+        vm.qmp('stop')
+        second, = struct.unpack('<Q', vm.memory(names['timer_ticks'], 8))
+        assert second - first >= 2, (first, second, 'Timer stopped / missing EOI')
+        assert vm.output() == READY, vm.output()
+        vm.qmp('cont')
+        assert vm.qmp('query-status')['running'], 'CPU stopped (possible triple fault)'
+    print(f'PASS {ram} MiB: long mode, IDT/TSS/IST, INT3 registers/DF, spurious IRQs, repeated PIT IRQs')
+
+
+def check_fatal(vm, vector, error, ist=False, cr2=None):
+    vm.wait_for(b'HALTED\r\n')
+    time.sleep(.05)              # Reboot, repeated exception and runaway output check.
+    output = vm.output()
+    assert b'ERROR' not in output and output.count(b'FATAL ') == 1, output
+    assert output.count(b'Hello\r\n') == 1, output
+    fields = {key.decode(): int(value, 16) for key, value in
+              re.findall(rb'(vector|error|rip|cs|rflags|rsp|ss|cr2)=([0-9a-f]{16})', output)}
+    assert fields['vector'] == vector and fields['error'] == error, output
+    assert fields['cs'] == 8 and fields['ss'] == 16, output
+    assert 0x100000 <= fields['rip'] < 0x200000, output
+    assert 0x100000 <= fields['rsp'] < 0x200000, output
+    assert bool(b'IST stack verified\r\n' in output) == ist, output
+    if cr2 is not None:
+        assert fields['cr2'] == cr2, output
+    registers = vm.registers()
+    check_long_mode(registers)
+    assert not reg(registers, '(?:RFL|EFL)') & (1 << 9), registers
+    address = symbols(vm.image)['timer_ticks']
+    ticks = vm.memory(address, 8)
+    time.sleep(.05)
+    assert vm.output() == output, vm.output()
+    assert vm.memory(address, 8) == ticks
+    assert vm.qmp('query-status')['running'], 'Triple fault stopped the VM'
+    return output
+
+
+def fault(qemu, vector, error):
+    image = ROOT / f'build/fault-{vector}.bin'
+    image_check(image)
+    with VM(qemu, image) as vm:
+        vm.wait_for(b'HALTED\r\n')
+        vm.connect()
+        output = check_fatal(vm, vector, error, ist=vector == 8,
+                             cr2=0x40000000 if vector == 14 else None)
+        assert output.startswith(BOOT), output
+        assert b'READY:' not in output, output
+    print(f'PASS exception {vector}: real CPU fault, error={error:#x}, serial frame, safe halt'
+          + (' on dedicated double-fault IST' if vector == 8 else ''))
+
+
+def nmi(qemu):
+    with VM(qemu, ROOT / 'build/kernel.bin') as vm:
+        vm.wait_for(READY)
+        vm.connect()
+        vm.qmp('inject-nmi')
+        check_fatal(vm, 2, 0, ist=True)
+    print('PASS NMI: QMP injection uses separate IST and halts with diagnostics')
+
+
+def unsupported(qemu):
+    marker = b'Boot error: long mode unsupported\r\n'
+    with VM(qemu, ROOT / 'build/kernel.bin', cpu='pentium3') as vm:
+        vm.wait_for(marker)
+        vm.connect()
+        time.sleep(.05)
+        assert vm.output() == marker, vm.output()
+        registers = vm.registers()
+        assert not reg(registers, 'EFER') & (1 << 10), registers
+        assert not reg(registers, '(?:RFL|EFL)') & (1 << 9), registers
+        assert vm.qmp('query-status')['running']
+    print('PASS unsupported CPU: explicit serial error before 64-bit execution')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default='qemu-system-x86_64')
     args = parser.parse_args()
-    image_check()
+    image_check(ROOT / 'build/kernel.bin')
     for ram in (16, 64, 128):
-        boot(args.qemu, ram, 'qemu64', b'Hello\r\n', True)
-        print(f'PASS {ram} MiB: Hello on COM1, long mode, PAE, paging and interrupts disabled')
-    boot(args.qemu, 64, 'pentium3', b'Boot error: long mode unsupported\r\n', False)
-    print('PASS unsupported CPU: explicit serial error before 64-bit execution')
+        boot(args.qemu, ram)
+    for vector, error in ((6, 0), (13, 0x28), (14, 0), (8, 0)):
+        fault(args.qemu, vector, error)
+    nmi(args.qemu)
+    unsupported(args.qemu)
 
 
 if __name__ == '__main__':
