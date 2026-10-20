@@ -11,6 +11,7 @@ CFLAGS = -m64 -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-pie \
 QEMU_FLAGS = -machine pc -cpu qemu64 -m 64 -accel tcg -display none \
              -serial stdio -monitor none -nic none -no-reboot -no-shutdown
 OBJS = build/entry.o build/interrupt_stubs.o build/main.o build/serial.o build/interrupts.o
+OBJS += build/scheduler.o build/switch.o
 OBJS += build/bootmem.o build/bootinfo.o build/pmm.o build/vmm.o build/memory_test.o
 FAULTS = 6 8 13 14 15 16 17 18 19 20 100 101
 FAULT_OBJS = $(foreach n,$(FAULTS),build/fault-$(n).o)
@@ -19,6 +20,10 @@ FAULT_IMAGES = $(foreach n,$(FAULTS),build/fault-$(n).bin)
 all: build/kernel.bin
 
 build/entry.o: boot/entry.asm
+	@mkdir -p build
+	$(AS) -f elf64 -g -F dwarf $< -o $@
+
+build/switch.o: boot/switch.asm
 	@mkdir -p build
 	$(AS) -f elf64 -g -F dwarf $< -o $@
 
@@ -70,3 +75,7 @@ clean:
 .PHONY: all run debug test test-host clean
 .SECONDARY:
 -include $(wildcard build/*.d)
+
+test-scheduler: build/kernel.bin
+	python3 tests/test_scheduler.py --qemu "$(QEMU)"
+.PHONY: test-scheduler

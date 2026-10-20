@@ -1,6 +1,7 @@
 #include "serial.h"
 #include "interrupts.h"
 #include "vmm.h"
+#include "scheduler.h"
 _Static_assert(sizeof(void *) == 8, "This starter requires x86_64");
 #ifndef TEST_FAULT
 #define TEST_FAULT 0
@@ -36,7 +37,15 @@ void kernel_main(uint32_t boot_info) {
     (void)serial_write("PASS PIT: IRQ0 ticking at ~100 Hz\n");
     if (TEST_FAULT >= 15 && TEST_FAULT <= 20) memory_test_fault(TEST_FAULT);
     if (TEST_FAULT && TEST_FAULT < 15) interrupt_test_fault(TEST_FAULT);
+    __asm__ volatile ("cli" ::: "memory");
+    scheduler_init();
+    __asm__ volatile ("sti" ::: "memory");
+    if (!scheduler_selftest()) {
+        (void)serial_write("ERROR: scheduler self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS scheduler: yield, sleep, exit, capacity, reuse\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
-    /* Timer IRQs wake HLT. No scheduler is introduced in this milestone. */
-    for (;;) __asm__ volatile ("hlt" ::: "memory");
+    /* Bootstrap is the idle task. IRQ handlers never invoke the scheduler. */
+    for (;;) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); }
 }

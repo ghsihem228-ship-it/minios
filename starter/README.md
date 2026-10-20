@@ -1,4 +1,21 @@
-# Step 3: physical and virtual memory management
+# Step 4: cooperative kernel scheduler
+
+Read [the scheduler design, API, code guide, tests and risks](docs/04-scheduler.md).
+This milestone builds on step 3's physical and virtual memory manager.
+Seven static worker stacks support cooperative round robin, yield, sleep and exit.
+Timer IRQs advance sleep deadlines but do not preempt tasks.
+
+```bash
+make
+make test-scheduler
+make test
+make run
+```
+
+The step-3 reference below describes the memory subsystem. Normal boot now also
+prints `PASS scheduler: yield, sleep, exit, capacity, reuse` before READY.
+
+## Step 3 reference: physical and virtual memory management
 
 The independent **C11/x86_64** kernel now consumes the Multiboot memory map,
 allocates physical frames, and replaces the temporary 1-GiB huge-page identity
