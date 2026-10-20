@@ -5,6 +5,8 @@
 #include "syscall.h"
 #include "process.h"
 #include "pipe.h"
+#include "console.h"
+extern _Noreturn void shell_run(void);
 _Static_assert(sizeof(void *) == 8, "This starter requires x86_64");
 #ifndef TEST_FAULT
 #define TEST_FAULT 0
@@ -12,6 +14,7 @@ _Static_assert(sizeof(void *) == 8, "This starter requires x86_64");
 extern _Noreturn void memory_test_fault(unsigned test);
 void kernel_main(uint32_t boot_info) {
     serial_init();
+    console_init();
     (void)serial_write("Hello\n");
     interrupts_init();
     (void)serial_write("IDT ready: 256 gates; TSS/IST ready\n");
@@ -75,6 +78,5 @@ void kernel_main(uint32_t boot_info) {
     }
     (void)serial_write("PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
-    /* Bootstrap is the idle task. IRQ handlers never invoke the scheduler. */
-    for (;;) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); }
+    shell_run();
 }

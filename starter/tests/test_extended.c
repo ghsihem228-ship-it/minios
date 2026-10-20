@@ -1,4 +1,5 @@
 #include "fs.h"
+#include "store.h"
 #include "elf.h"
 #include "pipe.h"
 #include "error.h"
@@ -39,9 +40,47 @@ static void transaction_test(void) {
     handle_table_clear(&t);
     assert(filesystem.root.refs == 1);
 }
+static void store_test(void) {
+    unsigned char valid[STORE_BYTES], mutant[STORE_BYTES];
+    struct fs_image original = {0}, decoded, before;
+    original.nodes[0].used = 1; original.nodes[0].size = 5;
+    bytes_copy(original.nodes[0].name, "hello", 6);
+    bytes_copy(original.nodes[0].data, "world", 5);
+    store_encode(&original, valid);
+    assert(store_decode(valid, sizeof(valid), &decoded));
+    assert(bytes_equal(&original, &decoded, sizeof(original)));
+    for (unsigned i = 0; i < 100000; i++) {
+        bytes_copy(mutant, valid, sizeof(valid));
+        unsigned changes = 1 + random_word() % 8;
+        while (changes--) mutant[random_word() % STORE_BYTES] = (unsigned char)random_word();
+        size_t length = i & 1 ? STORE_BYTES : random_word() % STORE_BYTES;
+        bytes_copy(&before, &decoded, sizeof(before));
+        if (!store_decode(mutant, length, &decoded))
+            assert(bytes_equal(&before, &decoded, sizeof(before)));
+        else {
+            for (unsigned j = 0; j < FS_FILES; j++) {
+                assert(decoded.nodes[j].used <= 1 && decoded.nodes[j].size <= FS_BYTES);
+                if (decoded.nodes[j].used) {
+                    unsigned k = 0;
+                    while (k < 32 && decoded.nodes[j].name[k]) k++;
+                    assert(k > 0 && k < 32);
+                }
+            }
+        }
+    }
+    /* Duplicate names and malformed size/used fields must be rejected. */
+    bytes_copy(mutant, valid, sizeof(valid));
+    bytes_copy(mutant + STORE_ENTRY, valid, STORE_ENTRY);
+    assert(!store_decode(mutant, sizeof(mutant), &decoded));
+    valid[0] = 2; assert(!store_decode(valid, sizeof(valid), &decoded));
+    valid[0] = 1; valid[7] = 255;
+    assert(!store_decode(valid, sizeof(valid), &decoded));
+    puts("PASS snapshot wire: roundtrip, duplicates, bounds, rejection atomicity; 100000 mutants under ASan/UBSan");
+}
 int main(int argc, char **argv) {
     assert(argc == 2 && fs_selftest() && pipe_selftest());
     transaction_test();
+    store_test();
     struct error_chain error;
     error_record(&error, SYS_EACCESS, SYS_FS_WRITE, CAP_WRITE);
     assert(error.version == 1 && error.count == 3);

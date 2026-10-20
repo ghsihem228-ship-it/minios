@@ -1,11 +1,6 @@
-> **Reference experiment, not the main MiniOS kernel.**
-> For the main project, use [the repository root](../README.md), build with its
-> Makefile, and boot `build/minios.bin`. Features documented below belong only
-> to this separate x86_64 experiment and have not been ported to the main kernel.
+# MiniOS64: active x86_64 kernel
 
-# C/x86_64 experimental kernel: milestones 1–13
-
-This independent starter boots in QEMU, runs capability-scoped code in actual ring 3,
+This 64-bit kernel boots in QEMU, runs capability-scoped code in actual ring 3,
 and exercises structured errors, VFS/RAMFS, a small source-level POSIX library,
 copy-on-write memory undo with staged file writes, and typed message pipes.
 The repository root still builds the older **i386 MiniOS**; run all commands below
@@ -32,19 +27,49 @@ cd /workspace/minios/starter
 make test
 ```
 
-`make run` is a headless serial boot/self-test demonstration, **not an interactive
-shell**. After the original milestone PASS lines, expect:
+`make run` starts the interactive serial shell. `make run-window` opens QEMU's
+VGA window (a graphical environment is required). Click the window to type;
+Ctrl+Alt+G releases captured input. The keyboard uses a US layout.
 
 ```text
-PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes
-READY: interrupts enabled; idle
+x64> help
+x64> write note hello
+x64> cat note
+x64> save
+x64> run demo
 ```
 
-Silence after READY is normal. The spin-program watchdog intentionally adds about
-two seconds per boot. Ctrl+C stops QEMU. No disk, GUI, host network, KVM or external
-service is required. `make clean` removes only starter/build. `make debug` stops at
-reset and binds the GDB stub to loopback port 1234; use build/kernel.elf for symbols.
-Do not boot the ELF directly: QEMU -kernel uses build/kernel.bin's Multiboot header.
+Both run targets create a dedicated 1 MiB disk at `disks/minios64.img` if absent.
+Existing images are preserved. Files change in RAM until `save` succeeds; the
+latest valid snapshot is restored on reboot. `make clean` preserves the disk.
+This is a private snapshot format, **not FAT32**; do not attach a physical disk
+or the older i386 image. `disk` reports whether saving is available. Unknown or
+unrecoverably corrupt formats are refused. Without a disk the shell still works.
+
+On Windows, install native QEMU using the [QEMU Windows download links](https://www.qemu.org/download/#windows).
+Build in Ubuntu/WSL, then copy these files to `C:\minios-run`:
+
+```bash
+mkdir -p /mnt/c/minios-run
+make disk
+cp build/kernel.bin disks/minios64.img run-windows.ps1 run-windows.cmd /mnt/c/minios-run/
+```
+
+Copy the image only on initial setup; preserve the Windows copy after saving
+files there. Double-click `run-windows.cmd`, or run from PowerShell:
+
+```powershell
+& C:\minios-run\run-windows.ps1
+# If QEMU is installed in a custom directory:
+& C:\minios-run\run-windows.ps1 -Qemu 'D:\tools\qemu\qemu-system-x86_64.exe'
+```
+
+The helper discovers QEMU or reports that it is missing; Ubuntu's QEMU is a
+separate installation. Native Windows launching has not been tested here.
+The spin-program watchdog adds about two seconds per boot. Close the QEMU window
+to stop the GUI guest; Ctrl+C stops the terminal guest. `make debug` binds a GDB
+stub to loopback port 1234; use `build/kernel.elf` for symbols. Boot with
+`build/kernel.bin`, whose Multiboot header supports QEMU's direct kernel loader.
 
 ## Current milestones and guides
 
@@ -67,6 +92,7 @@ the later guides and [current ABI](docs/abi-v1.md) supersede earlier API version
 | 11 | [Small POSIX source-compatibility library](docs/11-posix.md) |
 | 12 | [COW memory rollback and staged existing-file writes](docs/12-transactions.md) |
 | 13 | [Typed, bounded message pipes](docs/13-typed-pipes.md) |
+| 14 | [Interactive console and durable file snapshots](docs/14-console-storage.md) |
 
 ## Tests and source layout
 
@@ -87,7 +113,7 @@ also exchange typed messages through explicitly delegated read/write endpoints.
 
 Host ASan/UBSan tests include 100,000 memory-map cases, 50,000 frame-owner model
 operations, 100,000 handle cases, 100,000 two-table capability model operations,
-100,000 scalar-dispatch cases, and 100,000 ELF/wire mutant rounds. These are
+100,000 scalar-dispatch cases, and 100,000 ELF/wire mutant rounds and 100,000 snapshot parser mutants. These are
 reproducible bounded tests, not proofs or coverage-guided fuzz campaigns.
 
 ```text
@@ -102,9 +128,9 @@ docs/                design/specification for each milestone, current syscall AB
 
 - Single CPU and one user runner at a time. Kernel tasks remain trusted/cooperative;
   there is no concurrent per-process CR3 scheduler, SMP or FPU/TLS context support.
-- RAMFS is a kernel reference backend and loses data at reboot. Moving filesystems,
+- RAMFS has explicit whole-filesystem disk snapshots. Moving filesystems,
   networking and most drivers to user services is still needed for the hybrid goal.
-- No interactive shell, runtime exec, disk filesystem or general Unix binary support.
+- The shell runs embedded ELF programs; there is no runtime disk exec or general Unix binary support.
   POSIX is a small source-level subset, not conformance or a complete libc.
 - Transactions undo memory and existing-file writes/offsets. They reject namespace,
   handle-table and pipe effects while active; they do not implement installer undo,
@@ -114,3 +140,5 @@ docs/                design/specification for each milestone, current syscall AB
 - ABI v1.2 currently defines eighteen calls. Do not invent dozens of placeholder calls
   merely to hit a target count. Extending/finalizing the full public ABI needs real
   services and compatibility review.
+
+The remaining work toward the full OS is tracked in [the roadmap](docs/roadmap.md).

@@ -1,5 +1,6 @@
 #include "serial.h"
 #include "io.h"
+#include "console.h"
 #define COM1 0x3F8u
 #define TX_POLLS 100000u
 void serial_init(void) {
@@ -21,9 +22,11 @@ static int put_byte(uint8_t value) {
     return 0;
 }
 int serial_write(const char *text) {
+    int okay = 1;
     for (; *text; text++) {
-        if (*text == '\n' && !put_byte('\r')) return 0;
-        if (!put_byte((uint8_t)*text)) return 0;
+        console_putc(*text);
+        if (okay && *text == '\n' && !put_byte('\r')) okay = 0;
+        if (okay && !put_byte((uint8_t)*text)) okay = 0;
     }
-    return 1;
+    return okay;
 }

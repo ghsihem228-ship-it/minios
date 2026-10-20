@@ -29,3 +29,14 @@ This validates the stated starter subsets. It is not POSIX conformance testing,
 production security certification, proof of SMP correctness, crash/power-failure
 testing, a coverage-guided fuzz campaign, or validation of a user-mode filesystem
 server. Those features are not implemented and must not be inferred from PASS.
+
+## Interactive console and snapshot storage (2026-10-20)
+
+`make test` passes with the VGA/serial shell enabled: original multi-RAM boot,
+CPU exception and protection checks; all host sanitizer/model suites; 100000
+snapshot wire mutants; QMP PS/2 input, editing/overflow, VGA scrolling, serial
+input, guest fault/timeout recovery and frame accounting; real ATA save/reboot,
+independent image decoding, fallback from a damaged newer snapshot, and refusal
+to modify unrecoverably corrupt/unknown images. Storage tests use temporary
+images exclusively. This does not establish physical power-loss safety or native
+Windows GUI compatibility; the latter helper has only been reviewed here.

@@ -13,6 +13,8 @@ QEMU_FLAGS = -machine pc -cpu qemu64 -m 64 -accel tcg -display none \
 OBJS = build/entry.o build/interrupt_stubs.o build/main.o build/serial.o build/interrupts.o
 OBJS += build/syscall.o build/syscall_entry.o build/syscall_stubs.o
 OBJS += build/capability_test.o
+OBJS += build/block.o build/store.o build/store_wire.o
+OBJS += build/console.o build/shell.o
 OBJS += build/runtime.o build/pipe.o
 OBJS += build/elf.o build/process.o build/services.o build/user_entry.o build/user_blob.o build/user_test.o
 OBJS += build/vfs.o
@@ -53,8 +55,20 @@ build/kernel.elf: $(OBJS) linker.ld
 build/kernel.bin: build/kernel.elf
 	$(OBJCOPY) -O binary $< $@
 
-run: build/kernel.bin
-	$(QEMU) $(QEMU_FLAGS) -kernel $<
+DISK_IMAGE ?= disks/minios64.img
+
+disk:
+	python3 tools/mkdisk.py "$(DISK_IMAGE)"
+
+.PHONY: disk
+
+run: build/kernel.bin disk
+	$(QEMU) $(QEMU_FLAGS) -drive file="$(DISK_IMAGE)",format=raw,if=ide,index=0 -kernel $<
+
+run-window: build/kernel.bin disk
+	$(QEMU) -machine pc -cpu qemu64 -m 64 -accel tcg -serial none -monitor none -nic none -no-reboot -no-shutdown -drive file="$(DISK_IMAGE)",format=raw,if=ide,index=0 -kernel $<
+
+.PHONY: run-window
 
 debug: build/kernel.bin
 	$(QEMU) $(QEMU_FLAGS) -kernel $< -S -gdb tcp:127.0.0.1:1234
@@ -72,6 +86,8 @@ build/fault-%.bin: build/fault-%.elf
 test: build/kernel.bin $(FAULT_IMAGES)
 	python3 tests/test_boot.py --qemu "$(QEMU)"
 	$(MAKE) test-host
+	python3 tests/test_shell.py --qemu "$(QEMU)"
+	python3 tests/test_store.py --qemu "$(QEMU)"
 
 build/test_memory: tests/test_memory.c kernel/bootmem.c kernel/pmm.c kernel/bootmem.h kernel/pmm.h
 	@mkdir -p build
@@ -152,7 +168,7 @@ build/user-%.elf: build/user_demo_%.o build/user_mini.o build/user_start.o build
 build/user_blob.o: boot/user_blob.asm $(USER_IMAGES)
 	$(AS) -f elf64 $< -o $@
 
-build/test_extended: tests/test_extended.c kernel/fs.c kernel/fs_test.c kernel/vfs.c kernel/elf.c kernel/pipe.c kernel/error.c kernel/handle.c kernel/object.c $(wildcard kernel/*.h)
+build/test_extended: tests/test_extended.c kernel/store_wire.c kernel/fs.c kernel/fs_test.c kernel/vfs.c kernel/elf.c kernel/pipe.c kernel/error.c kernel/handle.c kernel/object.c $(wildcard kernel/*.h)
 	@mkdir -p build
 	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -DOBJECT_HOST_TEST \
 	    -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie \
@@ -161,3 +177,11 @@ test-extended: build/kernel.bin build/test_extended
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_extended build/user-0.elf
 	python3 tests/test_scheduler.py --qemu "$(QEMU)"
 .PHONY: test-extended
+
+test-shell: build/kernel.bin
+	python3 tests/test_shell.py --qemu "$(QEMU)"
+.PHONY: test-shell
+
+test-store: build/kernel.bin
+	python3 tests/test_store.py --qemu "$(QEMU)"
+.PHONY: test-store

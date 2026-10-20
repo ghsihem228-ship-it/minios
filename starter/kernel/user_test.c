@@ -4,6 +4,13 @@
 static struct ramfs filesystem;
 #define ELF(n) extern const unsigned char user_elf_##n[], user_elf_##n##_end[];
 ELF(0) ELF(1) ELF(2) ELF(3) ELF(4) ELF(5) ELF(6) ELF(7) ELF(8)
+struct ramfs *user_filesystem(void) { return &filesystem; }
+int64_t user_demo_run(unsigned index) {
+    const unsigned char *const images[] = {user_elf_0,user_elf_1,user_elf_2,user_elf_3,user_elf_4,user_elf_5,user_elf_6,user_elf_7,user_elf_8};
+    const unsigned char *const ends[] = {user_elf_0_end,user_elf_1_end,user_elf_2_end,user_elf_3_end,user_elf_4_end,user_elf_5_end,user_elf_6_end,user_elf_7_end,user_elf_8_end};
+    if (index >= 9) return SYS_ENOENT;
+    return user_run(images[index], (size_t)(ends[index] - images[index]), index == 6 ? NULL : &filesystem, index == 6 ? 0 : CAP_ALL);
+}
 int user_selftest(void) {
     fs_init(&filesystem);
     uint64_t before;

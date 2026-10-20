@@ -11,7 +11,7 @@ image_check(image)
 for ram in (16, 64, 128):
     vm = VM(args.qemu, image, ram=ram)
     try:
-        vm.wait_for(b'READY: interrupts enabled; idle\r\n')
+        vm.wait_for(READY)
         assert vm.output() == READY, vm.output()
         assert vm.process.poll() is None, 'QEMU stopped unexpectedly'
         print(f'PASS scheduler QEMU: {ram} MiB')

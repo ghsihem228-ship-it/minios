@@ -31,6 +31,7 @@
 #define SYS_EFORMAT (-INT64_C(12))
 #define SYS_ECONFLICT (-INT64_C(13))
 #define SYS_ENOMEM (-INT64_C(14))
+#define SYS_EIO (-INT64_C(15))
 #define SYS_OK INT64_C(0)
 #define SYS_ENOSYS (-INT64_C(1))
 #define SYS_EINVAL (-INT64_C(2))

@@ -2,14 +2,14 @@
 
 A small x86 operating system kernel written from scratch in C and assembly, built to learn how an OS really works.
 
-**This repository root contains the main MiniOS kernel.** Build and run it from
-`minios/`, using the root Makefile. Its output is `build/minios.bin`; it includes
-the interactive shell, user processes, persistent FAT32 storage and networking.
+**Active development target: [the 64-bit kernel in `starter/`](starter/README.md).**
+Build it inside `starter/`; its output is `starter/build/kernel.bin`. It now has
+an interactive VGA/serial shell and explicitly saved disk snapshots.
 
-`starter/` is a separate x86_64 experiment kept as reference, **not a replacement
-for the main kernel**. Its recent features are not integrated into main MiniOS.
-For main-kernel development, use `kernel/`, `boot/`, `user/`, `tests/` and the
-Makefile here; do not switch into `starter/`.
+The repository root retains the separate **32-bit i386 MiniOS** implementation.
+The remaining sections of this README describe that older kernel, built with the
+root Makefile as `build/minios.bin`. Its FAT32 and networking implementations
+are not features of the 64-bit kernel. Neither source tree has been deleted.
 
 ## Goals
 

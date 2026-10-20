@@ -16,6 +16,8 @@ int user_fault(struct interrupt_frame *);
 void user_finish(struct interrupt_frame *, int64_t);
 int services_dispatch(struct interrupt_frame *, struct syscall_result *);
 int user_selftest(void);
+struct ramfs *user_filesystem(void);
+int64_t user_demo_run(unsigned index);
 int64_t user_enter(uint64_t entry, uint64_t stack, uint64_t root_handle);
 extern uint64_t user_host_sp, user_host_flags;
 extern void user_return(void);

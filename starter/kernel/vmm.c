@@ -69,6 +69,8 @@ int memory_init(uint32_t boot_info) {
         if (pa >= (uintptr_t)__rodata_start && pa < (uintptr_t)__rodata_end) flags = PTE_NX;
         if (!identity(pa, flags)) return 0;
     }
+    /* QEMU PC VGA text aperture: explicit supervisor RW/NX MMIO mapping. */
+    if (!identity(0xb8000, PTE_WRITE | PTE_NX)) return 0;
     uint64_t *slot = leaf(VM_ARENA, 1);
     if (!slot) return 0;
     arena_pt = slot; /* Arena starts at a 2-MiB boundary: index 0 in its PT. */

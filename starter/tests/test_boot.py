@@ -16,7 +16,7 @@ BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
         b'PASS PMM: memory map, ownership, exhaustion/reuse\r\n'
         b'PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\r\n'
         b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
-READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\n'
+READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\nMiniOS64 shell. Type help. Use save to keep files.\r\nx64> '
 
 
 def symbols(image):
@@ -39,7 +39,7 @@ def image_check(image):
 
 
 class VM:
-    def __init__(self, qemu, image, ram=64, cpu='qemu64', extra=()):
+    def __init__(self, qemu, image, ram=64, cpu='qemu64', extra=(), serial_input=False):
         self.image = image
         self.folder_handle = tempfile.TemporaryDirectory(prefix='kernel-step3-')
         self.folder = Path(self.folder_handle.name)
@@ -47,9 +47,12 @@ class VM:
         self.endpoint = self.folder / 'qmp'
         self.log = (self.folder / 'qemu.log').open('w+')
         self.socket = self.stream = self.process = None
+        serial_args = ['-serial', f'file:{self.serial}']
+        if serial_input:
+            serial_args = ['-chardev', f'socket,id=uart,path={self.folder}/uart,server=on,wait=off,logfile={self.serial}', '-serial', 'chardev:uart']
         self.process = subprocess.Popen([
             qemu, '-machine', 'pc', '-cpu', cpu, '-m', str(ram), '-accel', 'tcg',
-            '-display', 'none', '-serial', f'file:{self.serial}', '-monitor', 'none',
+            '-display', 'none', *serial_args, '-monitor', 'none',
             '-nic', 'none', '-no-reboot', '-no-shutdown',
             '-qmp', f'unix:{self.endpoint},server=on,wait=off', '-kernel', str(image), *extra
         ], stdout=self.log, stderr=self.log)

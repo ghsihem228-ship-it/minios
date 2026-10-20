@@ -58,6 +58,7 @@ handles. It does not implicitly transfer them to another user process.
 | -12 | EFORMAT | malformed typed frame or unexpected message type |
 | -13 | ECONFLICT | transaction baseline revision changed |
 | -14 | ENOMEM | COW output preparation cannot allocate a frame |
+| -15 | EIO | disk snapshot I/O failed (kernel storage interface; no raw-disk syscall) |
 
 Loader/runner failures are trusted kernel API results rather than user syscalls:
 bad ELF returns EFORMAT, mapping exhaustion ENOSPC, a user fault `-1000-vector`,
