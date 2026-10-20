@@ -22,10 +22,10 @@ int main(void) {
     s->payload = 42;
     assert(object_init(&s->header, OBJECT_TEST, destroy_heap) == OBJ_OK);
     handle_t h;
-    assert(handle_install(&table, &s->header, &h) == OBJ_OK);
+    assert(handle_install(&table, &s->header, CAP_ALL, &h) == OBJ_OK);
     object_put(&s->header);
     struct object *pin;
-    assert(handle_lookup(&table, h, OBJECT_TEST, &pin) == OBJ_OK);
+    assert(handle_lookup(&table, h, OBJECT_TEST, CAP_READ, &pin) == OBJ_OK);
     assert(handle_close(&table, h) == OBJ_OK && !destroyed);
     assert(((struct sample *)pin)->payload == 42);
     object_put(pin); /* frees heap storage only when last lookup pin goes away */
@@ -40,7 +40,7 @@ int main(void) {
         unsigned index = random_word() % HANDLE_SLOTS;
         unsigned operation = random_word() % 5;
         if (operation == 0 && !live[index]) {
-            assert(handle_install(&table, &object, &live[index]) == OBJ_OK);
+            assert(handle_install(&table, &object, CAP_ALL, &live[index]) == OBJ_OK);
         } else if (operation == 1 && live[index]) {
             stale[index] = live[index];
             assert(handle_close(&table, live[index]) == OBJ_OK);
@@ -51,17 +51,17 @@ int main(void) {
             for (unsigned j = 0; j < HANDLE_SLOTS; j++)
                 if (live[j] && live[j] == token) found = 1;
             struct object *out;
-            enum object_status result = handle_lookup(&table, token, OBJECT_TEST, &out);
+            enum object_status result = handle_lookup(&table, token, OBJECT_TEST, CAP_READ, &out);
             assert(result == (found ? OBJ_OK : OBJ_INVALID));
             if (found) object_put(out); else assert(!out);
         } else if (operation == 3 && live[index]) {
             struct object *out;
-            assert(handle_lookup(&table, live[index], OBJECT_FILE, &out) == OBJ_TYPE && !out);
-            assert(handle_lookup(&table, live[index], OBJECT_TEST, &out) == OBJ_OK);
+            assert(handle_lookup(&table, live[index], OBJECT_FILE, CAP_READ, &out) == OBJ_TYPE && !out);
+            assert(handle_lookup(&table, live[index], OBJECT_TEST, CAP_READ, &out) == OBJ_OK);
             object_put(out);
         } else if (operation == 4 && stale[index]) {
             struct object *out;
-            assert(handle_lookup(&table, stale[index], OBJECT_TEST, &out) == OBJ_INVALID && !out);
+            assert(handle_lookup(&table, stale[index], OBJECT_TEST, CAP_READ, &out) == OBJ_INVALID && !out);
         }
         unsigned count = 0;
         for (unsigned j = 0; j < HANDLE_SLOTS; j++) if (live[j]) count++;

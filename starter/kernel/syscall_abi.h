@@ -1,12 +1,16 @@
 #ifndef STARTER_SYSCALL_ABI_H
 #define STARTER_SYSCALL_ABI_H
 #include <stdint.h>
+#include "capability.h"
 /* v1 scalar ABI. INT 0x80 remains DPL0 until a safe ring-3 entry exists. */
 #define SYS_ABI_MAJOR UINT64_C(1)
-#define SYS_ABI_VERSION (SYS_ABI_MAJOR << 32)
+#define SYS_ABI_VERSION ((SYS_ABI_MAJOR << 32) | UINT64_C(1))
 #define SYS_ABI_QUERY UINT64_C(0)
 #define SYS_HANDLE_CLOSE UINT64_C(1)
 #define SYS_HANDLE_DUPLICATE UINT64_C(2)
+#define SYS_HANDLE_RESTRICT UINT64_C(3)
+#define SYS_HANDLE_CLONE UINT64_C(4)
+#define SYS_EACCESS (-INT64_C(7))
 #define SYS_OK INT64_C(0)
 #define SYS_ENOSYS (-INT64_C(1))
 #define SYS_EINVAL (-INT64_C(2))

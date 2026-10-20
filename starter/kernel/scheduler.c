@@ -64,12 +64,24 @@ void scheduler_init(void) {
     for (unsigned i = 0; i < TASKS; i++) handle_table_init(&task_handles[i]);
     tasks[0].state = RUNNING;
 }
-int task_create(void (*entry)(void *), void *argument) {
+int task_create_with_caps(void (*entry)(void *), void *argument,
+                          const struct task_grant *grants, size_t count, handle_t *child_handles) {
+    if (count > HANDLE_SLOTS || (count && (!grants || !child_handles))) return -1;
+    for (size_t i = 0; i < count; i++) child_handles[i] = HANDLE_INVALID;
     if (!entry) return -1;
     uint64_t flags = irq_save();
     unsigned slot;
     for (slot = 1; slot < TASKS; slot++) if (tasks[slot].state == FREE) break;
     if (slot == TASKS) { irq_restore(flags); return -1; }
+    for (size_t i = 0; i < count; i++) {
+        if (handle_grant(task_handle_table(), grants[i].source, &task_handles[slot],
+                         grants[i].rights, &child_handles[i]) != OBJ_OK) {
+            handle_table_clear(&task_handles[slot]);
+            for (size_t j = 0; j < count; j++) child_handles[j] = HANDLE_INVALID;
+            irq_restore(flags);
+            return -1; /* Not published: no partially authorized child can run. */
+        }
+    }
     uint64_t *base = stacks[slot - 1];
     /* Wipe prior task data before reuse. Static stacks are still not isolated. */
     for (unsigned i = 0; i < STACK_SIZE / 8; i++) base[i] = 0;
@@ -82,6 +94,9 @@ int task_create(void (*entry)(void *), void *argument) {
                                 .entry = entry, .argument = argument };
     irq_restore(flags);
     return (int)slot; /* private slot, not a public handle or stable task ID */
+}
+int task_create(void (*entry)(void *), void *argument) {
+    return task_create_with_caps(entry, argument, NULL, 0, NULL);
 }
 void task_yield(void) {
     uint64_t flags = irq_save();
@@ -125,7 +140,7 @@ static void worker(void *argument) {
     handle_t handle;
     struct object *object = &worker_objects[index];
     if (object_init(object, OBJECT_TEST, worker_destroy) != OBJ_OK ||
-        handle_install(task_handle_table(), object, &handle) != OBJ_OK) {
+        handle_install(task_handle_table(), object, CAP_ALL, &handle) != OBJ_OK) {
         failed = 1;
         return;
     }
@@ -134,7 +149,7 @@ static void worker(void *argument) {
     for (unsigned i = 0; i < 12; i++) {
         if (local != UINT64_C(0x123456789abcdef0) + index) failed = 1;
         struct object *pin;
-        if (handle_lookup(task_handle_table(), handle, OBJECT_TEST, &pin) != OBJ_OK)
+        if (handle_lookup(task_handle_table(), handle, OBJECT_TEST, CAP_READ, &pin) != OBJ_OK)
             failed = 1;
         else {
             if (pin != object) failed = 1;
@@ -148,7 +163,12 @@ static void worker(void *argument) {
     }
     if (index) task_exit(); /* exercise explicit exit as well as return */
 }
-static void returning_worker(void *unused) { (void)unused; }
+static void returning_worker(void *unused) {
+    (void)unused;
+    /* Ordinary creation inherits nothing, including when a task slot is reused. */
+    for (unsigned i = 0; i < HANDLE_SLOTS; i++)
+        if (task_handle_table()->slots[i].object) failed = 1;
+}
 int scheduler_selftest(void) {
     if (task_create(0, 0) != -1) return 0;
     if (task_create(worker, (void *)0) < 0 || task_create(worker, (void *)1) < 0)
@@ -167,7 +187,44 @@ int scheduler_selftest(void) {
         if (task_create(returning_worker, 0) != -1) return 0;
         task_yield();
         task_yield();
-        if (task_live_count()) return 0;
+        if (task_live_count() || failed) return 0;
     }
     return 1;
+}
+
+static handle_t child_handle;
+static unsigned launch_seen, launch_failed, launch_destroyed;
+static void launch_destroy(struct object *o) { (void)o; launch_destroyed++; }
+static void capability_child(void *argument) {
+    (void)argument;
+    struct object *pin;
+    if (handle_lookup(task_handle_table(), child_handle, OBJECT_TEST, CAP_READ, &pin) != OBJ_OK)
+        launch_failed = 1;
+    else object_put(pin);
+    if (handle_lookup(task_handle_table(), child_handle, OBJECT_TEST, CAP_WRITE, &pin) != OBJ_DENIED)
+        launch_failed = 1;
+    handle_t copy;
+    if (handle_duplicate(task_handle_table(), child_handle, &copy) != OBJ_DENIED)
+        launch_failed = 1;
+    launch_seen++;
+    /* Leave delegated handle open: task_exit must release it. */
+}
+int capability_launch_selftest(void) {
+    struct object object;
+    handle_t parent;
+    if (object_init(&object, OBJECT_TEST, launch_destroy) != OBJ_OK ||
+        handle_install(task_handle_table(), &object, CAP_ALL, &parent) != OBJ_OK) return 0;
+    struct task_grant invalid[2] = { {parent, CAP_READ}, {parent, CAP_ALL | (UINT64_C(1) << 63)} };
+    handle_t partial[2] = {1, 1};
+    if (task_create_with_caps(capability_child, NULL, invalid, 2, partial) != -1 ||
+        partial[0] || partial[1] || object.refs != 2 || task_live_count() || launch_seen) return 0;
+    struct task_grant grant = { parent, CAP_READ };
+    if (task_create_with_caps(capability_child, NULL, &grant, 1, &child_handle) < 0) return 0;
+    /* Parent close does not revoke an independent child's reference. */
+    if (handle_close(task_handle_table(), parent) != OBJ_OK) return 0;
+    task_yield();
+    task_yield();
+    if (task_live_count() || launch_seen != 1 || launch_failed || object.refs != 1) return 0;
+    object_put(&object);
+    return launch_destroyed == 1;
 }

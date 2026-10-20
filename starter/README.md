@@ -1,3 +1,27 @@
+# Step 7: capability rights and explicit task grants
+
+Read [the capability design, specification, code guide, tests and risks](docs/07-capabilities.md).
+Handles now carry explicit rights. Lookup enforces requested rights, derivation
+can only reduce authority, and tasks start empty or receive an explicit launch
+grant list. Partial launch failure rolls back before the child is runnable.
+Scalar ABI v1.1 adds local restriction and attenuated clone calls.
+
+**Security limit:** tasks still run in trusted ring 0 and INT80 remains DPL0.
+These checks are not yet a sandbox against malicious applications.
+
+```bash
+make
+make test-capabilities
+make test
+make run
+```
+
+Boot adds `PASS capabilities: rights, attenuation, delegation, launch rollback`.
+Earlier milestone API signatures below/in their guides are historical; step 7
+supersedes handle signatures and the ABI minor version.
+
+---
+
 # Step 6: syscall ABI and kernel-invoked entry path
 
 Read [the step-6 design, ABI, implementation guide, tests and limits](docs/06-syscalls.md).

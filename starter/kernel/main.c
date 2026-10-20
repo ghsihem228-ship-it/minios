@@ -56,6 +56,11 @@ void kernel_main(uint32_t boot_info) {
         for (;;) __asm__ volatile ("cli; hlt");
     }
     (void)serial_write("PASS syscalls: INT80, registers, ABI, handles, rejection\n");
+    if (!capability_selftest() || !capability_launch_selftest()) {
+        (void)serial_write("ERROR: capability self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS capabilities: rights, attenuation, delegation, launch rollback\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
     /* Bootstrap is the idle task. IRQ handlers never invoke the scheduler. */
     for (;;) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); }

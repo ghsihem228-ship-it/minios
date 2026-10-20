@@ -18,7 +18,7 @@ int main(void) {
     r = syscall_execute(&table, SYS_ABI_QUERY, args);
     assert(r.status == SYS_OK && r.value == SYS_ABI_VERSION);
     assert(object_init(&object, OBJECT_TEST, destroy) == OBJ_OK);
-    assert(handle_install(&table, &object, &h) == OBJ_OK);
+    assert(handle_install(&table, &object, CAP_ALL, &h) == OBJ_OK);
     /* Every reserved argument register is validated before side effects. */
     for (uint64_t nr = 0; nr < 3; nr++) {
         for (unsigned i = 1; i < 6; i++) {
@@ -34,7 +34,7 @@ int main(void) {
     assert(r.status == SYS_OK && r.value != h);
     handle_t duplicate = r.value;
     for (unsigned i = 0; i < HANDLE_SLOTS - 2; i++)
-        assert(handle_install(&table, &object, &slots[i]) == OBJ_OK);
+        assert(handle_install(&table, &object, CAP_ALL, &slots[i]) == OBJ_OK);
     r = syscall_execute(&table, SYS_HANDLE_DUPLICATE, args);
     assert(r.status == SYS_ENOSPC && !r.value && object.refs == HANDLE_SLOTS + 1);
     handle_table_clear(&table);
@@ -43,7 +43,7 @@ int main(void) {
     args[0] = duplicate;
     r = syscall_execute(&table, SYS_HANDLE_DUPLICATE, args);
     assert(r.status == SYS_EBADHANDLE && !r.value);
-    assert(handle_install(&table, &object, &h) == OBJ_OK);
+    assert(handle_install(&table, &object, CAP_ALL, &h) == OBJ_OK);
     args[0] = h;
     object.refs = UINT32_MAX;
     r = syscall_execute(&table, SYS_HANDLE_DUPLICATE, args);

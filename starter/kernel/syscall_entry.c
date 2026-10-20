@@ -25,7 +25,7 @@ int syscall_selftest(void) {
     r = syscall_invoke(SYS_ABI_QUERY, 1, 0, 0, 0, 0, 1);
     if (r.status != SYS_EINVAL || r.value) return 0;
     if (object_init(&object, OBJECT_TEST, destroy) != OBJ_OK ||
-        handle_install(task_handle_table(), &object, &h) != OBJ_OK) return 0;
+        handle_install(task_handle_table(), &object, CAP_ALL, &h) != OBJ_OK) return 0;
     r = syscall_invoke(SYS_HANDLE_DUPLICATE, h, 0, 0, 0, 0, 0);
     if (r.status || !r.value || r.value == h) return 0;
     duplicate = r.value;
@@ -33,6 +33,20 @@ int syscall_selftest(void) {
     if (r.status || r.value) return 0;
     r = syscall_invoke(SYS_HANDLE_CLOSE, h, 0, 0, 0, 0, 0);
     if (r.status != SYS_EBADHANDLE || r.value) return 0;
+    r = syscall_invoke(SYS_HANDLE_CLOSE, duplicate, 0, 0, 0, 0, 0);
+    if (r.status || object.refs != 1) return 0;
+    if (handle_install(task_handle_table(), &object, CAP_ALL, &h) != OBJ_OK) return 0;
+    r = syscall_invoke(SYS_HANDLE_CLONE, h, CAP_READ, 0, 0, 0, 0);
+    if (r.status || !r.value) return 0;
+    duplicate = r.value;
+    r = syscall_invoke(SYS_HANDLE_DUPLICATE, duplicate, 0, 0, 0, 0, 0);
+    if (r.status != SYS_EACCESS || r.value) return 0;
+    r = syscall_invoke(SYS_HANDLE_RESTRICT, h, CAP_READ, 0, 0, 0, 0);
+    if (r.status || r.value) return 0;
+    r = syscall_invoke(SYS_HANDLE_RESTRICT, h, CAP_ALL, 0, 0, 0, 0);
+    if (r.status != SYS_EACCESS || r.value) return 0;
+    r = syscall_invoke(SYS_HANDLE_CLOSE, h, 0, 0, 0, 0, 0);
+    if (r.status) return 0;
     r = syscall_invoke(SYS_HANDLE_CLOSE, duplicate, 0, 0, 0, 0, 0);
     if (r.status || object.refs != 1) return 0;
     object_put(&object);
