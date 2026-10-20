@@ -1,3 +1,8 @@
+> **Reference experiment, not the main MiniOS kernel.**
+> For the main project, use [the repository root](../README.md), build with its
+> Makefile, and boot `build/minios.bin`. Features documented below belong only
+> to this separate x86_64 experiment and have not been ported to the main kernel.
+
 # C/x86_64 experimental kernel: milestones 1–13
 
 This independent starter boots in QEMU, runs capability-scoped code in actual ring 3,

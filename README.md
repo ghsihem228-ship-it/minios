@@ -2,8 +2,14 @@
 
 A small x86 operating system kernel written from scratch in C and assembly, built to learn how an OS really works.
 
-For the independent **C/x86_64 incremental restart (now milestones 1–13: tested experimental prototype)**, use [starter/README.md](starter/README.md).
-Run its commands from `starter/`; the root Makefile continues to build MiniOS i386.
+**This repository root contains the main MiniOS kernel.** Build and run it from
+`minios/`, using the root Makefile. Its output is `build/minios.bin`; it includes
+the interactive shell, user processes, persistent FAT32 storage and networking.
+
+`starter/` is a separate x86_64 experiment kept as reference, **not a replacement
+for the main kernel**. Its recent features are not integrated into main MiniOS.
+For main-kernel development, use `kernel/`, `boot/`, `user/`, `tests/` and the
+Makefile here; do not switch into `starter/`.
 
 ## Goals
 
