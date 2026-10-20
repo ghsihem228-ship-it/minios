@@ -1,5 +1,6 @@
 #include "interrupts.h"
 #include "syscall.h"
+#include "process.h"
 #include "io.h"
 #include "serial.h"
 #include <stddef.h>
@@ -28,7 +29,7 @@ extern const uintptr_t interrupt_stubs[256];
 extern void interrupt_load_gdt(const struct table_pointer *pointer);
 extern const char probe_breakpoint_resume[];
 static struct idt_gate idt[256] __attribute__((aligned(16)));
-static uint64_t gdt[5] __attribute__((aligned(16)));
+static uint64_t gdt[7] __attribute__((aligned(16)));
 static struct tss64 tss;
 static uint8_t df_stack[16384] __attribute__((section(".bss.df_stack"), aligned(4096)));
 static uint8_t nmi_stack[16384] __attribute__((section(".bss.nmi_stack"), aligned(4096)));
@@ -132,6 +133,8 @@ void interrupts_init(void) {
              (0x89ull << 40) | (((limit >> 16) & 15) << 48) |
              (((base >> 24) & 255) << 56);
     gdt[4] = base >> 32;
+    gdt[5] = 0x00affa000000ffffull; /* ring-3 64-bit code, selector 0x2b */
+    gdt[6] = 0x00cff2000000ffffull; /* ring-3 data, selector 0x33 */
     const struct table_pointer gdtr = {sizeof(gdt) - 1, (uintptr_t)gdt};
     interrupt_load_gdt(&gdtr);
     for (unsigned n = 0; n < 256; n++) {
@@ -178,9 +181,16 @@ void interrupt_dispatch(struct interrupt_frame *f) {
         }
         if (irq >= 8) out8(0xa0, 0x20);
         out8(0x20, 0x20);     /* EOI after service, slave before master. */
+        if (!irq && user_context.active && (f->cs & 3) == 3 && timer_ticks - user_context.deadline >= 200)
+            user_finish(f, -2000);
         return;
     }
+    if (user_fault(f)) return;
     fatal(f);
+}
+void user_gate(int enable, uint64_t stack) {
+    tss.rsp[0] = stack;
+    idt[128].attributes = enable ? 0xee : 0x8e;
 }
 int interrupt_selftest(void) {
     if (!interrupt_register_probe() || breakpoint_seen != 1) return 0;
@@ -208,7 +218,7 @@ _Noreturn void interrupt_test_fault(unsigned vector) {
     }
     if (vector == 8) idt[13].attributes = 0; /* #GP delivery -> #NP -> #DF. */
     if (vector == 13 || vector == 8)
-        __asm__ volatile ("mov $0x28, %%ax; mov %%ax, %%ds" ::: "rax", "memory");
+        __asm__ volatile ("mov $0x38, %%ax; mov %%ax, %%ds" ::: "rax", "memory");
     /* Test wiring errors must not appear as a successful fault test. */
     (void)serial_write("ERROR: expected exception missing\n");
     halt();

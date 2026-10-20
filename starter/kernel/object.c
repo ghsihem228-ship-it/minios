@@ -10,7 +10,7 @@ static _Noreturn void ownership_bug(void) {
 }
 enum object_status object_init(struct object *o, enum object_type type,
                                void (*destroy)(struct object *)) {
-    if (!o || !destroy || type < OBJECT_TEST || type > OBJECT_TIMER) return OBJ_INVALID;
+    if (!o || !destroy || type < OBJECT_TEST || type > OBJECT_PIPE) return OBJ_INVALID;
     *o = (struct object){ .refs = 1, .type = type, .destroy = destroy };
     return OBJ_OK;
 }

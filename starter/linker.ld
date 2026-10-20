@@ -21,6 +21,7 @@ SECTIONS
         __boot_guard = .; . += 4096; *(.bss.boot_stack)
         __df_guard = .; . += 4096; *(.bss.df_stack)
         __nmi_guard = .; . += 4096; *(.bss.nmi_stack)
+        __syscall_guard = .; . += 4096; *(.bss.syscall_stack)
         __mc_guard = .; . += 4096; *(.bss.mc_stack)
         *(.bss*)
         . = ALIGN(4096);

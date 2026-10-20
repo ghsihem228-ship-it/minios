@@ -13,9 +13,14 @@ QEMU_FLAGS = -machine pc -cpu qemu64 -m 64 -accel tcg -display none \
 OBJS = build/entry.o build/interrupt_stubs.o build/main.o build/serial.o build/interrupts.o
 OBJS += build/syscall.o build/syscall_entry.o build/syscall_stubs.o
 OBJS += build/capability_test.o
+OBJS += build/runtime.o build/pipe.o
+OBJS += build/elf.o build/process.o build/services.o build/user_entry.o build/user_blob.o build/user_test.o
+OBJS += build/vfs.o
+OBJS += build/error.o build/fs.o build/fs_test.o
 OBJS += build/object.o build/handle.o build/handle_test.o
 OBJS += build/scheduler.o build/switch.o
 OBJS += build/bootmem.o build/bootinfo.o build/pmm.o build/vmm.o build/memory_test.o
+USER_IMAGES = $(foreach n,0 1 2 3 4 5 6 7 8,build/user-$(n).elf)
 FAULTS = 6 8 13 14 15 16 17 18 19 20 100 101
 FAULT_OBJS = $(foreach n,$(FAULTS),build/fault-$(n).o)
 FAULT_IMAGES = $(foreach n,$(FAULTS),build/fault-$(n).bin)
@@ -73,7 +78,8 @@ build/test_memory: tests/test_memory.c kernel/bootmem.c kernel/pmm.c kernel/boot
 	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -fsanitize=address,undefined \
 	    -fno-omit-frame-pointer -fno-pie -no-pie tests/test_memory.c kernel/bootmem.c kernel/pmm.c -o $@
 
-test-host: build/test_memory build/test_handle build/test_syscall build/test_capability
+test-host: build/test_memory build/test_handle build/test_syscall build/test_capability build/test_extended $(USER_IMAGES)
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_extended build/user-0.elf
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_memory
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_capability
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_syscall
@@ -123,3 +129,35 @@ test-capabilities: build/kernel.bin build/test_capability
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_capability
 	python3 tests/test_scheduler.py --qemu "$(QEMU)"
 .PHONY: test-capabilities
+
+build/user_entry.o: boot/user.asm
+	@mkdir -p build
+	$(AS) -f elf64 -g -F dwarf $< -o $@
+
+USER_CFLAGS = $(filter-out -MMD -MP,$(CFLAGS)) -Ikernel -Iuser
+build/user_start.o: user/start.asm
+	@mkdir -p build
+	$(AS) -f elf64 $< -o $@
+build/user_call.o: boot/syscall.asm
+	@mkdir -p build
+	$(AS) -f elf64 $< -o $@
+build/user_mini.o: user/mini.c user/mini.h kernel/syscall_abi.h kernel/capability.h
+	@mkdir -p build
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+build/user_demo_%.o: user/demo.c user/mini.h kernel/syscall_abi.h
+	@mkdir -p build
+	$(CC) $(USER_CFLAGS) -DUSER_TEST=$* -c $< -o $@
+build/user-%.elf: build/user_demo_%.o build/user_mini.o build/user_start.o build/user_call.o user/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $(filter %.o,$^)
+build/user_blob.o: boot/user_blob.asm $(USER_IMAGES)
+	$(AS) -f elf64 $< -o $@
+
+build/test_extended: tests/test_extended.c kernel/fs.c kernel/fs_test.c kernel/vfs.c kernel/elf.c kernel/pipe.c kernel/error.c kernel/handle.c kernel/object.c $(wildcard kernel/*.h)
+	@mkdir -p build
+	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -DOBJECT_HOST_TEST \
+	    -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie \
+	    $(filter %.c,$^) -o $@
+test-extended: build/kernel.bin build/test_extended
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_extended build/user-0.elf
+	python3 tests/test_scheduler.py --qemu "$(QEMU)"
+.PHONY: test-extended

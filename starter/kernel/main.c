@@ -3,6 +3,8 @@
 #include "vmm.h"
 #include "scheduler.h"
 #include "syscall.h"
+#include "process.h"
+#include "pipe.h"
 _Static_assert(sizeof(void *) == 8, "This starter requires x86_64");
 #ifndef TEST_FAULT
 #define TEST_FAULT 0
@@ -61,6 +63,17 @@ void kernel_main(uint32_t boot_info) {
         for (;;) __asm__ volatile ("cli; hlt");
     }
     (void)serial_write("PASS capabilities: rights, attenuation, delegation, launch rollback\n");
+    if (!fs_selftest() || !pipe_selftest() || !pipe_task_selftest()) {
+        (void)serial_write("ERROR: filesystem/pipe self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    int user_result = user_selftest();
+    if (user_result) {
+        char number[4] = {(char)('0' + user_result / 100 % 10), (char)('0' + user_result / 10 % 10), (char)('0' + user_result % 10), 0};
+        (void)serial_write("ERROR: userspace self-test "); (void)serial_write(number); (void)serial_write("\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
     /* Bootstrap is the idle task. IRQ handlers never invoke the scheduler. */
     for (;;) { task_yield(); __asm__ volatile ("sti; hlt" ::: "memory"); }

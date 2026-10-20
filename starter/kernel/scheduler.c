@@ -17,6 +17,8 @@ struct task {
 static struct task tasks[TASKS];
 static unsigned current;
 static struct handle_table task_handles[TASKS];
+static struct error_chain task_errors[TASKS];
+struct error_chain *task_error_chain(void) { return &task_errors[current]; }
 struct handle_table *task_handle_table(void) { return &task_handles[current]; }
 /* Slot zero uses the existing bootstrap stack. No allocator dependency. */
 static uint64_t stacks[TASKS - 1][STACK_SIZE / 8] __attribute__((aligned(16)));
@@ -90,6 +92,7 @@ int task_create_with_caps(void (*entry)(void *), void *argument,
     *--sp = 0; /* Dummy return slot: SysV C entry RSP is 8 mod 16. */
     *--sp = (uintptr_t)task_start;
     for (unsigned i = 0; i < 6; i++) *--sp = 0; /* r15..rbp */
+    error_record(&task_errors[slot], SYS_OK, 0, 0);
     tasks[slot] = (struct task){ .sp = (uintptr_t)sp, .state = READY,
                                 .entry = entry, .argument = argument };
     irq_restore(flags);

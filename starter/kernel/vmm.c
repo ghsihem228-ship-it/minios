@@ -2,6 +2,7 @@
 
 #define ADDRESS_MASK UINT64_C(0x000ffffffffff000)
 extern const char __load_start[], __bss_end[], __text_start[], __text_end[];
+extern const char __syscall_guard[];
 extern const char __rodata_start[], __rodata_end[];
 extern const char __boot_guard[], __df_guard[], __nmi_guard[], __mc_guard[];
 static uint64_t root_physical;
@@ -39,7 +40,7 @@ static uint64_t *leaf(uint64_t va, int create) {
     return &p[(va >> 12) & 511];
 }
 static int guard(uint64_t pa) {
-    return pa == (uintptr_t)__boot_guard || pa == (uintptr_t)__df_guard ||
+    return pa == (uintptr_t)__syscall_guard || pa == (uintptr_t)__boot_guard || pa == (uintptr_t)__df_guard ||
            pa == (uintptr_t)__nmi_guard || pa == (uintptr_t)__mc_guard;
 }
 static int identity(uint64_t pa, uint64_t flags) {
@@ -192,4 +193,123 @@ int memory_selftest(void) {
     REQUIRE(vm_alloc_page(VM_ARENA));
     REQUIRE(vm_lookup(VM_ARENA, &pa, &flags) && (flags & PTE_NX) && (flags & PTE_WRITE));
     return 1;
+}
+
+/* One bounded user arena. Shared kernel mappings stay supervisor-only at leaves.
+ * Parent U bits alone do not grant access to supervisor kernel leaves. */
+#include "user_vm.h"
+#include "bytes.h"
+static uint64_t *user_pt;
+static uint64_t saved_user[USER_PAGES];
+static int snapshot;
+static int user_tables(void) {
+    if (user_pt) return 1;
+    uint64_t *slot = leaf(USER_BASE, 1);
+    if (!slot) return 0;
+    uint64_t *p = table(root_physical);
+    for (unsigned shift = 39; shift > 12; shift -= 9) {
+        unsigned index = (USER_BASE >> shift) & 511;
+        p[index] |= PTE_USER;
+        p = table(p[index] & ADDRESS_MASK);
+    }
+    user_pt = slot;
+    return 1;
+}
+int vm_user_map(unsigned index, uint64_t flags) {
+    if (index >= USER_PAGES || (flags & ~(PTE_WRITE | PTE_NX)) ||
+        ((flags & PTE_WRITE) && !(flags & PTE_NX)) || !user_tables() || user_pt[index]) return 0;
+    uint64_t pa = pmm_alloc();
+    if (!pa) return 0;
+    zero_frame(pa);
+    if (!pmm_set_mapped(pa, 1)) { (void)pmm_free(pa); return 0; }
+    user_pt[index] = pa | flags | PTE_USER | PTE_PRESENT;
+    invalidate(USER_BASE + index * PAGE_SIZE); return 1;
+}
+void *vm_user_physical(unsigned index) {
+    if (!user_pt || index >= USER_PAGES || !(user_pt[index] & PTE_PRESENT)) return NULL;
+    return table(user_pt[index] & ADDRESS_MASK);
+}
+int vm_snapshot_begin(void) {
+    if (snapshot || !user_pt) return 0;
+    for (unsigned i = 0; i < USER_PAGES; i++) {
+        saved_user[i] = user_pt[i];
+        user_pt[i] &= ~PTE_WRITE;
+        invalidate(USER_BASE + i * PAGE_SIZE);
+    }
+    snapshot = 1; return 1;
+}
+int vm_user_cow(uint64_t address) {
+    if (!snapshot || address < USER_BASE || address >= USER_END) return 0;
+    unsigned i = (address - USER_BASE) / PAGE_SIZE;
+    if (!(saved_user[i] & PTE_WRITE) || (user_pt[i] & PTE_WRITE) ||
+        (user_pt[i] & ADDRESS_MASK) != (saved_user[i] & ADDRESS_MASK)) return 0;
+    uint64_t pa = pmm_alloc();
+    if (!pa) return 0;
+    bytes_copy(table(pa), table(saved_user[i] & ADDRESS_MASK), PAGE_SIZE);
+    if (!pmm_set_mapped(pa, 1)) { (void)pmm_free(pa); return 0; }
+    user_pt[i] = pa | PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NX;
+    invalidate(USER_BASE + i * PAGE_SIZE); return 1;
+}
+void vm_snapshot_end(int rollback) {
+    if (!snapshot) return;
+    for (unsigned i = 0; i < USER_PAGES; i++) {
+        uint64_t old = saved_user[i] & ADDRESS_MASK, now = user_pt[i] & ADDRESS_MASK;
+        if (old && old != now) {
+            uint64_t discarded = rollback ? now : old;
+            (void)pmm_set_mapped(discarded, 0); (void)pmm_free(discarded);
+        }
+        if (rollback) user_pt[i] = saved_user[i];
+        else if (saved_user[i] & PTE_WRITE) user_pt[i] |= PTE_WRITE;
+        invalidate(USER_BASE + i * PAGE_SIZE);
+    }
+    snapshot = 0;
+}
+void vm_user_clear(void) {
+    vm_snapshot_end(1);
+    if (!user_pt) return;
+    for (unsigned i = 0; i < USER_PAGES; i++) {
+        uint64_t pa = user_pt[i] & ADDRESS_MASK;
+        user_pt[i] = 0; invalidate(USER_BASE + i * PAGE_SIZE);
+        if (pa) { (void)pmm_set_mapped(pa, 0); (void)pmm_free(pa); }
+    }
+}
+int vm_user_check(uint64_t address, size_t length, int write) {
+    if (!length) return 1;
+    if (!user_pt || address < USER_BASE || address >= USER_END || length > USER_END - address) return 0;
+    unsigned first = (address - USER_BASE) / PAGE_SIZE;
+    unsigned last = (address + length - 1 - USER_BASE) / PAGE_SIZE;
+    for (unsigned i = first; i <= last; i++) {
+        if (!(user_pt[i] & PTE_PRESENT)) return 0;
+        if (write && !(user_pt[i] & PTE_WRITE) && !(snapshot && (saved_user[i] & PTE_WRITE))) return 0;
+    }
+    return 1;
+}
+int vm_user_prepare(uint64_t address, size_t length) {
+    if (!vm_user_check(address, length, 1)) return 0;
+    if (!length) return 1;
+    unsigned first = (address - USER_BASE) / PAGE_SIZE;
+    unsigned last = (address + length - 1 - USER_BASE) / PAGE_SIZE;
+    for (unsigned i = first; i <= last; i++)
+        if (!(user_pt[i] & PTE_WRITE) && !vm_user_cow(USER_BASE + i * PAGE_SIZE)) return 0;
+    return 1;
+}
+static void user_copy(uint64_t address, void *data, size_t length, int out) {
+    unsigned char *buffer = data;
+    while (length) {
+        unsigned index = (address - USER_BASE) / PAGE_SIZE;
+        size_t offset = address & (PAGE_SIZE - 1), n = PAGE_SIZE - offset;
+        if (n > length) n = length;
+        unsigned char *physical = vm_user_physical(index);
+        if (out) bytes_copy(physical + offset, buffer, n);
+        else bytes_copy(buffer, physical + offset, n);
+        address += n; buffer += n; length -= n;
+    }
+}
+int vm_user_read(void *to, uint64_t address, size_t length) {
+    if (!vm_user_check(address, length, 0)) return 0;
+    user_copy(address, to, length, 0); return 1;
+}
+int vm_user_write(uint64_t address, const void *from, size_t length) {
+    if (!vm_user_prepare(address, length)) return 0;
+    user_copy(address, (void *)from, length, 1); return 1;
 }

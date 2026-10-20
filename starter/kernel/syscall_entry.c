@@ -1,15 +1,39 @@
 #include "syscall.h"
 #include "interrupts.h"
 #include "scheduler.h"
+#include "process.h"
 #include <stddef.h>
 _Static_assert(sizeof(struct syscall_result) == 16, "SysV result registers");
 _Static_assert(offsetof(struct syscall_result, value) == 8, "SysV second result");
 void syscall_dispatch(struct interrupt_frame *f) {
     uint64_t args[6] = { f->rdi, f->rsi, f->rdx, f->r10, f->r8, f->r9 };
-    struct syscall_result r = syscall_execute(task_handle_table(), f->rax, args);
+    uint64_t number = f->rax;
+    int user = user_context.active && (f->cs & 3) == 3;
+    struct handle_table *table = user ? &user_context.handles : task_handle_table();
+    struct error_chain *error = user ? &user_context.error : task_error_chain();
+    struct syscall_result r;
+    if (number == SYS_ERROR_GET) {
+        r = (struct syscall_result){ SYS_EINVAL, 0 };
+        if (!(args[2] | args[3] | args[4] | args[5])) r = error_field(error, args[0], args[1]);
+    } else {
+        int handled = services_dispatch(f, &r);
+        if (handled == 2) return;
+        if (!handled) {
+            if (user && user_context.transaction && number >= SYS_HANDLE_CLOSE && number <= SYS_HANDLE_CLONE)
+                r = (struct syscall_result){SYS_EBUSY, 0};
+            else r = syscall_execute(table, number, args);
+        }
+        uint64_t required = number == SYS_HANDLE_DUPLICATE ? CAP_DUPLICATE :
+                            number == SYS_HANDLE_CLONE ? CAP_DUPLICATE | args[1] :
+                            number == SYS_HANDLE_RESTRICT ? args[1] :
+                            number == SYS_TX_BEGIN ? CAP_CONTROL : number == SYS_FS_WRITE || number == SYS_FS_UNLINK || number == SYS_PIPE_SEND ? CAP_WRITE :
+                            number == SYS_FS_READ || number == SYS_PIPE_RECEIVE ? CAP_READ : number == SYS_FS_OPEN ? CAP_READ | args[3] | (args[4] ? CAP_WRITE : 0) : 0;
+        error_record(error, r.status, number, required);
+    }
     f->rax = (uint64_t)r.status;
     f->rdx = r.value;
 }
+
 static unsigned destroyed;
 static void destroy(struct object *o) { (void)o; destroyed++; }
 int syscall_selftest(void) {

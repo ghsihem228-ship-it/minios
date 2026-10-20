@@ -16,7 +16,7 @@ BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
         b'PASS PMM: memory map, ownership, exhaustion/reuse\r\n'
         b'PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\r\n'
         b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
-READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'READY: interrupts enabled; idle\r\n'
+READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\n'
 
 
 def symbols(image):
@@ -140,6 +140,7 @@ def check_tables(vm, names, registers):
     for i, stack in enumerate(('df_stack', 'nmi_stack', 'mc_stack')):
         assert struct.unpack_from('<Q', tss, 36 + i * 8)[0] == names[stack] + 16384
     assert struct.unpack_from('<H', tss, 102)[0] == 104
+    assert struct.unpack_from('<Q', tss, 4)[0] == 0, 'RSP0 left enabled after user cleanup'
     pic = vm.qmp('human-monitor-command', **{'command-line': 'info pic'})
     assert re.search(r'pic0:.*imr=fe', pic) and re.search(r'pic1:.*imr=ff', pic), pic
 
@@ -170,7 +171,7 @@ def check_memory(vm, names, registers):
         for index, entry in enumerate(entries):
             if not entry & 1:
                 continue
-            assert not entry & 4, 'User permission leaked into kernel mapping'
+            assert shift != 12 or not entry & 4, 'User leaf leaked after process cleanup'
             assert not entry & 0x80, 'Unexpected huge page / PAT bit'
             target = entry & ADDRESS_MASK
             virtual = prefix | (index << shift)
@@ -184,7 +185,7 @@ def check_memory(vm, names, registers):
                 mappings[virtual] = entry
     walk(root, 39, 0)
     assert len(tables) == states.count(3)
-    for guard in ('__boot_guard', '__df_guard', '__nmi_guard', '__mc_guard'):
+    for guard in ('__boot_guard', '__df_guard', '__nmi_guard', '__mc_guard', '__syscall_guard'):
         assert names[guard] not in mappings
     assert 0 not in mappings and 0xa0000 not in mappings
     assert 0x40000000 not in mappings
@@ -374,7 +375,7 @@ def main():
     image_check(ROOT / 'build/kernel.bin')
     for ram in (2, 16, 64, 128, 512):
         boot(args.qemu, ram)
-    for vector, error in ((6, 0), (13, 0x28), (14, 0), (8, 0)):
+    for vector, error in ((6, 0), (13, 0x38), (14, 0), (8, 0)):
         fault(args.qemu, vector, error)
     for test, vector, error, address, ist in (
         (15, 14, 0, 0, False), (16, 14, 3, 'text', False),
