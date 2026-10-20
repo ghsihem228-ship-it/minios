@@ -1,10 +1,12 @@
 #include "serial.h"
 #include "interrupts.h"
+#include "vmm.h"
 _Static_assert(sizeof(void *) == 8, "This starter requires x86_64");
 #ifndef TEST_FAULT
 #define TEST_FAULT 0
 #endif
-void kernel_main(void) {
+extern _Noreturn void memory_test_fault(unsigned test);
+void kernel_main(uint32_t boot_info) {
     serial_init();
     (void)serial_write("Hello\n");
     interrupts_init();
@@ -14,9 +16,26 @@ void kernel_main(void) {
         for (;;) __asm__ volatile ("cli; hlt");
     }
     (void)serial_write("PASS INT3/IRQ0: 64-bit GPRs, DF/IF, IRETQ; spurious IRQ7/15\n");
+    /* Fault-image-only metadata corruption exercises fail-closed boot paths. */
+    if (TEST_FAULT == 100) *(volatile uint32_t *)(uintptr_t)boot_info &= ~(1u << 6);
+    if (TEST_FAULT == 101) {
+        uint32_t map = *(const uint32_t *)(uintptr_t)(boot_info + 48);
+        *(volatile uint32_t *)(uintptr_t)map = 19;
+    }
+    if (!memory_init(boot_info)) {
+        (void)serial_write("Boot error: invalid or insufficient boot memory\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    if (!memory_selftest()) {
+        (void)serial_write("ERROR: memory self-test failed\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    (void)serial_write("PASS PMM: memory map, ownership, exhaustion/reuse\n");
+    (void)serial_write("PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\n");
     timer_wait(3);
     (void)serial_write("PASS PIT: IRQ0 ticking at ~100 Hz\n");
-    if (TEST_FAULT) interrupt_test_fault(TEST_FAULT);
+    if (TEST_FAULT >= 15 && TEST_FAULT <= 20) memory_test_fault(TEST_FAULT);
+    if (TEST_FAULT && TEST_FAULT < 15) interrupt_test_fault(TEST_FAULT);
     (void)serial_write("READY: interrupts enabled; idle\n");
     /* Timer IRQs wake HLT. No scheduler is introduced in this milestone. */
     for (;;) __asm__ volatile ("hlt" ::: "memory");

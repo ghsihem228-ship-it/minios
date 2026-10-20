@@ -29,9 +29,9 @@ extern const char probe_breakpoint_resume[];
 static struct idt_gate idt[256] __attribute__((aligned(16)));
 static uint64_t gdt[5] __attribute__((aligned(16)));
 static struct tss64 tss;
-static uint8_t df_stack[16384] __attribute__((aligned(16)));
-static uint8_t nmi_stack[16384] __attribute__((aligned(16)));
-static uint8_t mc_stack[16384] __attribute__((aligned(16)));
+static uint8_t df_stack[16384] __attribute__((section(".bss.df_stack"), aligned(4096)));
+static uint8_t nmi_stack[16384] __attribute__((section(".bss.nmi_stack"), aligned(4096)));
+static uint8_t mc_stack[16384] __attribute__((section(".bss.mc_stack"), aligned(4096)));
 /* Aligned, single-CPU 64-bit access. Volatile is not an SMP synchronization API. */
 volatile uint64_t timer_ticks;
 static unsigned breakpoint_seen, spurious_seen;

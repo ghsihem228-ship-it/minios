@@ -11,7 +11,8 @@ CFLAGS = -m64 -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-pie \
 QEMU_FLAGS = -machine pc -cpu qemu64 -m 64 -accel tcg -display none \
              -serial stdio -monitor none -nic none -no-reboot -no-shutdown
 OBJS = build/entry.o build/interrupt_stubs.o build/main.o build/serial.o build/interrupts.o
-FAULTS = 6 8 13 14
+OBJS += build/bootmem.o build/bootinfo.o build/pmm.o build/vmm.o build/memory_test.o
+FAULTS = 6 8 13 14 15 16 17 18 19 20 100 101
 FAULT_OBJS = $(foreach n,$(FAULTS),build/fault-$(n).o)
 FAULT_IMAGES = $(foreach n,$(FAULTS),build/fault-$(n).bin)
 
@@ -53,10 +54,19 @@ build/fault-%.bin: build/fault-%.elf
 
 test: build/kernel.bin $(FAULT_IMAGES)
 	python3 tests/test_boot.py --qemu "$(QEMU)"
+	$(MAKE) test-host
+
+build/test_memory: tests/test_memory.c kernel/bootmem.c kernel/pmm.c kernel/bootmem.h kernel/pmm.h
+	@mkdir -p build
+	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -fsanitize=address,undefined \
+	    -fno-omit-frame-pointer -fno-pie -no-pie tests/test_memory.c kernel/bootmem.c kernel/pmm.c -o $@
+
+test-host: build/test_memory
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_memory
 
 clean:
 	rm -rf build
 
-.PHONY: all run debug test clean
+.PHONY: all run debug test test-host clean
 .SECONDARY:
 -include $(wildcard build/*.d)

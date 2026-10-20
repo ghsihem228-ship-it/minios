@@ -28,6 +28,7 @@ _start:
     shr ecx, 2
     xor eax, eax
     rep stosd
+    mov [boot_info_address], ebx ; Preserve Multiboot info across CPUID.
     mov esp, stack_top
 
     ; Detect CPUID without executing it on an unsupported processor.
@@ -52,6 +53,8 @@ _start:
     cpuid
     test edx, 1 << 29
     jz no_long_mode
+    test edx, 1 << 20
+    jz no_nx
 
     ; PML4[0] -> PDPT[0] -> 512 supervisor 2-MiB identity mappings.
     mov eax, pdpt
@@ -78,7 +81,7 @@ _start:
     mov cr3, eax
     mov ecx, 0xC0000080    ; IA32_EFER
     rdmsr
-    or eax, 1 << 8         ; LME
+    or eax, (1 << 8) | (1 << 11) ; LME and NXE (checked above).
     wrmsr
     mov eax, cr0
     or eax, 1 << 31        ; PG; protected mode was established by the loader
@@ -93,6 +96,9 @@ no_cpuid:
     jmp boot_error
 no_long_mode:
     mov esi, mode_error
+    jmp boot_error
+no_nx:
+    mov esi, nx_error
 boot_error:
     ; No 64-bit C call is safe yet. Initialize COM1 and report a fixed cause.
     mov dx, COM1+1
@@ -151,6 +157,7 @@ long_mode:
     mov rsp, stack_top
     and rsp, -16           ; SysV AMD64: RSP is aligned before CALL
     xor ebp, ebp
+    mov edi, [boot_info_address]
     call kernel_main
 .hang:
     cli
@@ -170,12 +177,15 @@ gdt_pointer:
 magic_error: db "Boot error: invalid Multiboot entry",13,10,0
 cpuid_error: db "Boot error: CPUID unsupported",13,10,0
 mode_error: db "Boot error: long mode unsupported",13,10,0
+nx_error: db "Boot error: NX unsupported",13,10,0
 
 section .bss align=4096
 pml4: resb 4096
 pdpt: resb 4096
 pd: resb 4096
-alignb 16
+boot_info_address: resd 1
+section .bss.boot_stack nobits align=4096
+global stack_bottom, stack_top
 stack_bottom: resb 16384
 stack_top:
 section .note.GNU-stack noalloc noexec nowrite progbits

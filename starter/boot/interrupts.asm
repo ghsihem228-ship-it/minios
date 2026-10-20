@@ -150,6 +150,15 @@ probe_breakpoint_resume:
     pop rbx
     ret
 
+global memory_stack_fault
+memory_stack_fault:
+    mov rsp, rdi                ; Deliberately put the next frame in a guard.
+    ud2                         ; Fault delivery fails; #DF must use IST1.
+.halt:
+    cli
+    hlt
+    jmp .halt
+
 section .rodata align=8
 probe_expected:
 %assign reg_value 1

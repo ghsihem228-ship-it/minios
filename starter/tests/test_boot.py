@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise real x86_64 exception entry/return and PIC/PIT interrupts in QEMU."""
+"""Exercise real x86_64 exception entry/return and memory protection and PIC/PIT interrupts in QEMU."""
 import argparse
 import json
 from pathlib import Path
@@ -13,6 +13,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
         b'PASS INT3/IRQ0: 64-bit GPRs, DF/IF, IRETQ; spurious IRQ7/15\r\n'
+        b'PASS PMM: memory map, ownership, exhaustion/reuse\r\n'
+        b'PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\r\n'
         b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
 READY = BOOT + b'READY: interrupts enabled; idle\r\n'
 
@@ -37,9 +39,9 @@ def image_check(image):
 
 
 class VM:
-    def __init__(self, qemu, image, ram=64, cpu='qemu64'):
+    def __init__(self, qemu, image, ram=64, cpu='qemu64', extra=()):
         self.image = image
-        self.folder_handle = tempfile.TemporaryDirectory(prefix='kernel-step2-')
+        self.folder_handle = tempfile.TemporaryDirectory(prefix='kernel-step3-')
         self.folder = Path(self.folder_handle.name)
         self.serial = self.folder / 'serial.log'
         self.endpoint = self.folder / 'qmp'
@@ -49,7 +51,7 @@ class VM:
             qemu, '-machine', 'pc', '-cpu', cpu, '-m', str(ram), '-accel', 'tcg',
             '-display', 'none', '-serial', f'file:{self.serial}', '-monitor', 'none',
             '-nic', 'none', '-no-reboot', '-no-shutdown',
-            '-qmp', f'unix:{self.endpoint},server=on,wait=off', '-kernel', str(image)
+            '-qmp', f'unix:{self.endpoint},server=on,wait=off', '-kernel', str(image), *extra
         ], stdout=self.log, stderr=self.log)
 
     def output(self):
@@ -142,6 +144,65 @@ def check_tables(vm, names, registers):
     assert re.search(r'pic0:.*imr=fe', pic) and re.search(r'pic1:.*imr=ff', pic), pic
 
 
+ADDRESS_MASK = 0x000ffffffffff000
+ARENA = 0xffff800000000000
+NX = 1 << 63
+
+
+def check_memory(vm, names, registers):
+    assert reg(registers, 'CR0') & (1 << 16), 'Supervisor write protection disabled'
+    assert reg(registers, 'EFER') & (1 << 11), 'NXE disabled'
+    root, = struct.unpack('<Q', vm.memory(names['root_physical'], 8))
+    assert reg(registers, 'CR3') == root
+    count, = struct.unpack('<I', vm.memory(names['frame_count'], 4))
+    states = vm.memory(names['frames'], count)
+    free, = struct.unpack('<Q', vm.memory(names['free_frames'], 8))
+    assert states.count(1) == free and free > 0
+    assert states.count(2) == 0 and states.count(4) == 1
+    assert count <= 0x40000000 // 4096
+    tables = set()
+    mappings = {}
+    def walk(physical, shift, prefix):
+        assert physical not in tables, 'Cyclic or aliased page table'
+        tables.add(physical)
+        assert states[physical // 4096] == 3, 'Unowned page table'
+        entries = struct.unpack('<512Q', vm.memory(physical, 4096))
+        for index, entry in enumerate(entries):
+            if not entry & 1:
+                continue
+            assert not entry & 4, 'User permission leaked into kernel mapping'
+            assert not entry & 0x80, 'Unexpected huge page / PAT bit'
+            target = entry & ADDRESS_MASK
+            virtual = prefix | (index << shift)
+            if shift > 12:
+                walk(target, shift - 9, virtual)
+            else:
+                if virtual & (1 << 47):
+                    virtual |= 0xffff000000000000
+                assert target < 0x40000000 and (virtual == target or virtual == ARENA)
+                assert entry & NX or not entry & 2, 'Writable executable leaf'
+                mappings[virtual] = entry
+    walk(root, 39, 0)
+    assert len(tables) == states.count(3)
+    for guard in ('__boot_guard', '__df_guard', '__nmi_guard', '__mc_guard'):
+        assert names[guard] not in mappings
+    assert 0 not in mappings and 0xa0000 not in mappings
+    assert 0x40000000 not in mappings
+    assert mappings[names['__text_start']] & (NX | 2) == 0
+    assert mappings[names['__rodata_start']] & (NX | 2) == NX
+    assert mappings[names['frames'] & ~4095] & (NX | 2) == NX | 2
+    assert mappings[ARENA] & (NX | 2) == NX | 2
+    page = mappings[ARENA] & ADDRESS_MASK
+    assert states[page // 4096] == 4
+    assert mappings[page] & (NX | 2) == NX | 2
+    # The only executable pages must be the linked text range, with no RW alias.
+    for virtual, entry in mappings.items():
+        if not entry & NX:
+            assert names['__text_start'] <= virtual < names['__text_end']
+    for table in tables:
+        assert mappings[table] & (NX | 2) == NX | 2
+
+
 def boot(qemu, ram):
     image = ROOT / 'build/kernel.bin'
     names = symbols(image)
@@ -160,6 +221,7 @@ def boot(qemu, ram):
             raise AssertionError('Maskable interrupts never enabled')
         check_long_mode(registers)
         check_tables(vm, names, registers)
+        check_memory(vm, names, registers)
         first, = struct.unpack('<Q', vm.memory(names['timer_ticks'], 8))
         assert first >= 3
         vm.qmp('cont')
@@ -170,10 +232,10 @@ def boot(qemu, ram):
         assert vm.output() == READY, vm.output()
         vm.qmp('cont')
         assert vm.qmp('query-status')['running'], 'CPU stopped (possible triple fault)'
-    print(f'PASS {ram} MiB: long mode, IDT/TSS/IST, INT3 registers/DF, spurious IRQs, repeated PIT IRQs')
+    print(f'PASS {ram} MiB: PMM recovery, protected 4-KiB tables, IDT/IST, register preservation, PIT IRQs')
 
 
-def check_fatal(vm, vector, error, ist=False, cr2=None):
+def check_fatal(vm, vector, error, ist=False, cr2=None, execute=False):
     vm.wait_for(b'HALTED\r\n')
     time.sleep(.05)              # Reboot, repeated exception and runaway output check.
     output = vm.output()
@@ -183,7 +245,7 @@ def check_fatal(vm, vector, error, ist=False, cr2=None):
               re.findall(rb'(vector|error|rip|cs|rflags|rsp|ss|cr2)=([0-9a-f]{16})', output)}
     assert fields['vector'] == vector and fields['error'] == error, output
     assert fields['cs'] == 8 and fields['ss'] == 16, output
-    assert 0x100000 <= fields['rip'] < 0x200000, output
+    assert (fields['rip'] == ARENA if execute else 0x100000 <= fields['rip'] < 0x200000), output
     assert 0x100000 <= fields['rsp'] < 0x200000, output
     assert bool(b'IST stack verified\r\n' in output) == ist, output
     if cr2 is not None:
@@ -237,17 +299,95 @@ def unsupported(qemu):
     print('PASS unsupported CPU: explicit serial error before 64-bit execution')
 
 
+def memory_fault(qemu, test, vector, error, address=None, ist=False):
+    image = ROOT / f'build/fault-{test}.bin'
+    names = symbols(image)
+    if address == 'text':
+        address = names['__text_start']
+    if address == 'guard':
+        address = names['__boot_guard']
+    image_check(image)
+    with VM(qemu, image) as vm:
+        vm.wait_for(b'HALTED\r\n')
+        vm.connect()
+        output = check_fatal(vm, vector, error, ist=ist, cr2=address, execute=test == 17)
+        assert output.startswith(BOOT) and b'READY:' not in output, output
+    print(f'PASS memory fault {test}: vector={vector}, error={error:#x}, CR2/IST match')
+
+
+def bad_boot(qemu, test):
+    image = ROOT / f'build/fault-{test}.bin'
+    image_check(image)
+    marker = b'Boot error: invalid or insufficient boot memory\r\n'
+    with VM(qemu, image) as vm:
+        vm.wait_for(marker)
+        vm.connect()
+        first = vm.output()
+        time.sleep(.05)
+        assert first == vm.output() and first.endswith(marker), vm.output()
+        assert first.count(b'Hello\r\n') == 1 and b'PASS PMM' not in first
+        assert not reg(vm.registers(), '(?:RFL|EFL)') & (1 << 9)
+        assert vm.qmp('query-status')['running']
+    print(f'PASS boot rejection {test}: missing/corrupt memory map fails closed')
+
+
+def without_nx(qemu):
+    marker = b'Boot error: NX unsupported\r\n'
+    with VM(qemu, ROOT / 'build/kernel.bin', cpu='qemu64,-nx') as vm:
+        vm.wait_for(marker)
+        vm.connect()
+        time.sleep(.05)
+        assert vm.output() == marker, vm.output()
+        assert not reg(vm.registers(), 'EFER') & (1 << 10)
+        assert vm.qmp('query-status')['running']
+    print('PASS CPU without NX: explicit rejection before long mode')
+
+
+def module(qemu):
+    names = symbols(ROOT / 'build/kernel.bin')
+    with tempfile.TemporaryDirectory(prefix='kernel-module-') as folder:
+        path = Path(folder) / 'payload.bin'
+        payload = bytes(range(256)) * 32 + b'!'
+        path.write_bytes(payload)
+        with VM(qemu, ROOT / 'build/kernel.bin', extra=('-initrd', str(path))) as vm:
+            vm.wait_for(READY)
+            vm.connect()
+            vm.qmp('stop')
+            info, = struct.unpack('<I', vm.memory(names['boot_info_address'], 4))
+            data = vm.memory(info, 52)
+            flags, = struct.unpack_from('<I', data)
+            count, table = struct.unpack_from('<II', data, 20)
+            assert flags & 8 and count == 1
+            start, end = struct.unpack_from('<II', vm.memory(table, 16))
+            assert end - start == len(payload) and vm.memory(start, len(payload)) == payload
+            for frame in range(start // 4096, (end + 4095) // 4096):
+                assert vm.memory(names['frames'] + frame, 1) == b'\0'
+            check_memory(vm, names, vm.registers())
+            assert vm.output() == READY
+    print('PASS Multiboot module: partial edge frames reserved and payload preserved')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--qemu', default='qemu-system-x86_64')
     args = parser.parse_args()
     image_check(ROOT / 'build/kernel.bin')
-    for ram in (16, 64, 128):
+    for ram in (2, 16, 64, 128, 512):
         boot(args.qemu, ram)
     for vector, error in ((6, 0), (13, 0x28), (14, 0), (8, 0)):
         fault(args.qemu, vector, error)
+    for test, vector, error, address, ist in (
+        (15, 14, 0, 0, False), (16, 14, 3, 'text', False),
+        (17, 14, 17, ARENA, False), (18, 14, 0, 'guard', False),
+        (19, 8, 0, None, True), (20, 14, 0, ARENA, False)
+    ):
+        memory_fault(args.qemu, test, vector, error, address, ist)
     nmi(args.qemu)
     unsupported(args.qemu)
+    without_nx(args.qemu)
+    for test in (100, 101):
+        bad_boot(args.qemu, test)
+    module(args.qemu)
 
 
 if __name__ == '__main__':

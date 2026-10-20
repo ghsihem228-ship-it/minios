@@ -9,14 +9,20 @@ SECTIONS
     . = 0x100000;
     __load_start = .;
     .multiboot : { KEEP(*(.multiboot)) } :text
-    .text : { *(.text*) } :text
-    .rodata : { *(.rodata*) } :text
+    .text ALIGN(4096) : { __text_start = .; *(.text*) . = ALIGN(4096); __text_end = .; } :text
+    .rodata ALIGN(4096) : { __rodata_start = .; *(.rodata*) . = ALIGN(4096); __rodata_end = .; } :text
     /* The final byte makes the flat file length exactly load_end-load_start. */
-    .data : { *(.data*) BYTE(0) } :data
+    .data ALIGN(4096) : { *(.data*) BYTE(0) } :data
     __load_end = .;
     .bss ALIGN(4096) (NOLOAD) : {
         __bss_start = .;
-        *(.bss*) *(COMMON)
+        *(.bss) *(COMMON)
+        . = ALIGN(4096);
+        __boot_guard = .; . += 4096; *(.bss.boot_stack)
+        __df_guard = .; . += 4096; *(.bss.df_stack)
+        __nmi_guard = .; . += 4096; *(.bss.nmi_stack)
+        __mc_guard = .; . += 4096; *(.bss.mc_stack)
+        *(.bss*)
         . = ALIGN(4096);
         __bss_end = .;
     } :data
