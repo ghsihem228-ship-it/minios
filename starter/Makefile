@@ -22,7 +22,7 @@ OBJS += build/error.o build/fs.o build/fs_test.o
 OBJS += build/object.o build/handle.o build/handle_test.o
 OBJS += build/scheduler.o build/switch.o
 OBJS += build/bootmem.o build/bootinfo.o build/pmm.o build/vmm.o build/memory_test.o
-USER_IMAGES = $(foreach n,0 1 2 3 4 5 6 7 8 9 10 11,build/user-$(n).elf)
+USER_IMAGES = $(foreach n,0 1 2 3 4 5 6 7 8 9 10 11 12,build/user-$(n).elf)
 FAULTS = 6 8 13 14 15 16 17 18 19 20 100 101
 FAULT_OBJS = $(foreach n,$(FAULTS),build/fault-$(n).o)
 FAULT_IMAGES = $(foreach n,$(FAULTS),build/fault-$(n).bin)
@@ -83,19 +83,22 @@ build/fault-%.elf: build/fault-%.o $(filter-out build/main.o,$(OBJS)) linker.ld
 build/fault-%.bin: build/fault-%.elf
 	$(OBJCOPY) -O binary $< $@
 
-test: build/kernel.bin $(FAULT_IMAGES)
+test: build/kernel.bin $(FAULT_IMAGES) build/disk-demo.elf
 	python3 tests/test_boot.py --qemu "$(QEMU)"
 	$(MAKE) test-host
 	python3 tests/test_shell.py --qemu "$(QEMU)"
 	python3 tests/test_store.py --qemu "$(QEMU)"
 	python3 tests/test_processes.py --qemu "$(QEMU)"
+	python3 tests/test_ipc.py --qemu "$(QEMU)"
+	python3 tests/test_exec.py --qemu "$(QEMU)"
 
 build/test_memory: tests/test_memory.c kernel/bootmem.c kernel/pmm.c kernel/bootmem.h kernel/pmm.h
 	@mkdir -p build
 	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -fsanitize=address,undefined \
 	    -fno-omit-frame-pointer -fno-pie -no-pie tests/test_memory.c kernel/bootmem.c kernel/pmm.c -o $@
 
-test-host: build/test_memory build/test_handle build/test_syscall build/test_capability build/test_extended $(USER_IMAGES)
+test-host: build/test_ipc build/test_memory build/test_handle build/test_syscall build/test_capability build/test_extended $(USER_IMAGES)
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_ipc
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_extended build/user-0.elf
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_memory
 	ASAN_OPTIONS=detect_leaks=1 ./build/test_capability
@@ -164,6 +167,16 @@ build/user_mini.o: user/mini.c user/mini.h kernel/syscall_abi.h kernel/capabilit
 build/user_demo_%.o: user/demo.c user/mini.h kernel/syscall_abi.h
 	@mkdir -p build
 	$(CC) $(USER_CFLAGS) -DUSER_TEST=$* -c $< -o $@
+build/user_supervisor.o: user/supervisor.c user/mini.h kernel/syscall_abi.h
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+build/user_service.o: user/ipc_service.c user/mini.h kernel/syscall_abi.h
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+build/ipc_blob.o: user/ipc_blob.asm build/user-13.embed.elf
+	$(AS) -f elf64 $< -o $@
+build/user-12.elf: build/user_supervisor.o build/ipc_blob.o build/user_mini.o build/user_start.o build/user_call.o user/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $(filter %.o,$^)
+build/user-13.elf: build/user_service.o build/user_mini.o build/user_start.o build/user_call.o user/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $(filter %.o,$^)
 build/user-9.elf: build/probe-9.o user/linker.ld
 	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $<
 build/user-10.elf: build/probe-10.o user/linker.ld
@@ -200,3 +213,26 @@ test-store: build/kernel.bin
 test-processes: build/kernel.bin
 	python3 tests/test_processes.py --qemu "$(QEMU)"
 .PHONY: test-processes
+
+build/test_ipc: tests/test_ipc.c kernel/pipe.c kernel/object.c kernel/handle.c $(wildcard kernel/*.h)
+	@mkdir -p build
+	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Ikernel -DOBJECT_HOST_TEST \
+	    -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie \
+	    $(filter %.c,$^) -o $@
+test-ipc: build/kernel.bin build/test_ipc
+	ASAN_OPTIONS=detect_leaks=1 ./build/test_ipc
+	python3 tests/test_ipc.py --qemu "$(QEMU)"
+.PHONY: test-ipc
+
+build/disk_demo.o: user/disk.asm
+	@mkdir -p build
+	$(AS) -f elf64 $< -o $@
+build/disk-full.elf: build/disk_demo.o user/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -T user/linker.ld -o $@ $<
+build/disk-demo.elf: build/disk-full.elf tools/packelf.py
+	python3 tools/packelf.py $< $@
+demo-disk: build/disk-demo.elf
+	python3 tools/mkdisk.py disks/demo64.img --file hello build/disk-demo.elf
+test-exec: build/kernel.bin build/disk-demo.elf
+	python3 tests/test_exec.py --qemu "$(QEMU)"
+.PHONY: demo-disk test-exec

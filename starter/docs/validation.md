@@ -58,4 +58,23 @@ Transaction demos check XMM/x87 checkpoint restoration. A background transaction
 that writes a staged file and then spins must hit its separate watchdog, abort
 its file changes, leave other jobs alive and release its resources. Kernel
 scheduler checks at 16/64/128 MiB also remain required. This does not establish
-SMP safety, a public process-control ABI, blocking IPC or production readiness.
+SMP safety or production readiness. Public process controls and blocking IPC
+were added and tested in the subsequent milestone below.
+
+
+## Process capabilities, IPC and disk execution (2026-10-21)
+
+The full `make -C starter -j2 test` suite passed after these changes. In addition
+to existing boot, fault, memory, process, shell and storage regressions:
+
+- Host ASan/UBSan checks 1000 endpoint lifecycles, closure/EOF, EPIPE, wait signals,
+  duplicate/grant lifetimes and allocation rollback.
+- QEMU at 2/16/64 MiB runs real parent/child typed RPCs, rejects amplified grants,
+  checks status/control rights, timeouts, orphan cleanup, killed sleeping/blocked
+  children and memory reclamation while two CPU-bound processes compete.
+- Disk execution runs a separately built 318-byte ELF, verifies its file write,
+  rejects malformed/W+X images, preserves existing images during creation, saves
+  and reboots, and independently decodes the resulting snapshot bank.
+
+These tests validate the documented bounded interfaces, not general Unix binary
+compatibility, user-space drivers, a network stack or a complete desktop OS.

@@ -3,7 +3,7 @@ static uint64_t directory, descriptors[8];
 int errno;
 static size_t length(const char *s) { size_t n = 0; while (s[n] && n <= 31) n++; return n; }
 static int fail(int64_t status) {
-    errno = status == SYS_EACCESS ? 13 : status == SYS_ENOENT ? 2 : status == SYS_EBADHANDLE ? 9 :
+    errno = status == SYS_EPIPE ? 32 : status == SYS_ETIMEDOUT ? 110 : status == SYS_EACCESS ? 13 : status == SYS_ENOENT ? 2 : status == SYS_EBADHANDLE ? 9 :
             status == SYS_ENOSPC ? 28 : status == SYS_EFAULT ? 14 : status == SYS_EBUSY ? 16 :
             status == SYS_ENOMEM ? 12 : status == SYS_EAGAIN ? 11 : status == SYS_ENOSYS ? 38 : status == SYS_EOVERFLOW ? 75 : 22;
     return -1;
@@ -69,4 +69,32 @@ size_t mini_error(char *out, size_t capacity) {
     }
     if (capacity) out[used < capacity ? used : capacity - 1] = 0;
     return used;
+}
+
+int mini_spawn(const void *elf, size_t size, const struct launch_grant *grants, size_t count, uint64_t *process) {
+    struct syscall_result r = syscall_invoke(SYS_PROCESS_SPAWN, (uintptr_t)elf, size, (uintptr_t)grants, count, 0, 0);
+    *process = r.status ? 0 : r.value;
+    return r.status ? fail(r.status) : 0;
+}
+int mini_process_status(uint64_t process, int64_t *code) {
+    struct syscall_result r = syscall_invoke(SYS_PROCESS_STATUS, process, 0, 0, 0, 0, 0);
+    if (r.status) return fail(r.status);
+    *code = (int64_t)r.value; return 0;
+}
+int mini_kill(uint64_t process) {
+    struct syscall_result r = syscall_invoke(SYS_PROCESS_KILL, process, 0, 0, 0, 0, 0);
+    return r.status ? fail(r.status) : 0;
+}
+int mini_wait(uint64_t handle, uint64_t signals, uint64_t ticks, uint64_t *observed) {
+    struct syscall_result r = syscall_invoke(SYS_OBJECT_WAIT, handle, signals, ticks, 0, 0, 0);
+    *observed = r.status ? 0 : r.value;
+    return r.status ? fail(r.status) : 0;
+}
+int mini_sleep(uint64_t ticks) {
+    struct syscall_result r = syscall_invoke(SYS_SLEEP, ticks, 0, 0, 0, 0, 0);
+    return r.status ? fail(r.status) : 0;
+}
+int mini_yield(void) {
+    struct syscall_result r = syscall_invoke(SYS_YIELD, 0, 0, 0, 0, 0, 0);
+    return r.status ? fail(r.status) : 0;
 }

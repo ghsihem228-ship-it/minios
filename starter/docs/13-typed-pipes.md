@@ -80,3 +80,7 @@ A receiver can keep rejecting an unexpected message and block progress until it
 chooses a compatible type or closes the pipe. A future protocol needs explicit
 schema/version negotiation and application-level rejection policy. Limits prevent
 memory exhaustion per object; global pipe/handle quotas still bound total use.
+
+## Subsequent implementation
+
+Milestone 16 supersedes the original endpoint lifetime: pipes now have separate read/write objects, EOF, peer-closed signals and blocking readiness waits.

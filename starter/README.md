@@ -96,6 +96,20 @@ the later guides and [current ABI](docs/abi-v1.md) supersede earlier API version
 | 13 | [Typed, bounded message pipes](docs/13-typed-pipes.md) |
 | 14 | [Interactive console and durable file snapshots](docs/14-console-storage.md) |
 | 15 | [Isolated, timer-preempted user processes](docs/15-processes.md) |
+| 16 | [Process capabilities, child grants and blocking IPC](docs/16-process-ipc.md) |
+| 17 | [Disk-backed ELF execution](docs/17-disk-exec.md) |
+
+Try the real parent/child service with `run ipc`. To execute a program from a
+new, separately seeded snapshot image:
+
+```bash
+make demo-disk
+make run-window DISK_IMAGE=disks/demo64.img
+```
+
+Inside the guest, use `runfile hello`, then `cat disk-note` and `save`. The program
+writes `from-disk` and exits with status 42. Existing disk images are never replaced
+by the image creation tool. See [disk execution](docs/17-disk-exec.md).
 
 ## Tests and source layout
 
@@ -103,6 +117,8 @@ the later guides and [current ABI](docs/abi-v1.md) supersede earlier API version
 make test            # complete QEMU regressions plus all host sanitizer/model tests
 make test-extended   # new host parser/storage tests and actual ring-3 integration
 make test-processes  # concurrent ring-3 programs, live CR3 checks, kill and cleanup
+make test-ipc        # child grants, waits, EOF, cancellation and process lifetimes
+make test-exec       # execute a saved ELF, reject bad images, save/reboot
 make test-host       # all host tests; builds its own user ELF fixture
 make -j2 test        # parallel compilation, same validation
 ```
@@ -136,14 +152,16 @@ docs/                design/specification for each milestone, current syscall AB
   thread API, TLS or AVX support.
 - RAMFS has explicit whole-filesystem disk snapshots. Moving filesystems,
   networking and most drivers to user services is still needed for the hybrid goal.
-- The shell runs embedded ELF programs; there is no runtime disk exec or general Unix binary support.
+- The shell runs embedded programs and small disk ELF files with `runfile`.
+  Disk files are limited to 2 KiB; general Unix binaries are unsupported.
   POSIX is a small source-level subset, not conformance or a complete libc.
 - Transactions undo memory and existing-file writes/offsets. They reject namespace,
   handle-table and pipe effects while active; they do not implement installer undo,
   durable disk transactions, external-effect reversal or nested checkpoints.
-- Typed pipes are bounded/nonblocking. No EOF signaling, blocking wait or user-process
-  handle-transfer transport exists yet. Kernel launch grants provide explicit transfer.
-- ABI v1.2 currently defines eighteen calls. Do not invent dozens of placeholder calls
+- Typed sends/receives are bounded/nonblocking, with EOF and blocking readiness waits.
+  Public child creation transfers attenuated startup grants; runtime handle messages
+  and multi-object wait sets remain unimplemented.
+- ABI v1.3 currently defines twenty-four calls. Do not invent dozens of placeholder calls
   merely to hit a target count. Extending/finalizing the full public ABI needs real
   services and compatibility review.
 

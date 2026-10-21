@@ -2,9 +2,9 @@
 #define STARTER_SYSCALL_ABI_H
 #include <stdint.h>
 #include "capability.h"
-/* v1 scalar ABI. INT 0x80 remains DPL0 until a safe ring-3 entry exists. */
+/* INT80 ABI; user gate enabled only during a controlled CPL3 dispatch. */
 #define SYS_ABI_MAJOR UINT64_C(1)
-#define SYS_ABI_VERSION ((SYS_ABI_MAJOR << 32) | UINT64_C(2))
+#define SYS_ABI_VERSION ((SYS_ABI_MAJOR << 32) | UINT64_C(3))
 #define SYS_ABI_QUERY UINT64_C(0)
 #define SYS_HANDLE_CLOSE UINT64_C(1)
 #define SYS_HANDLE_DUPLICATE UINT64_C(2)
@@ -24,6 +24,22 @@
 #define SYS_PIPE_CREATE UINT64_C(15)
 #define SYS_PIPE_SEND UINT64_C(16)
 #define SYS_PIPE_RECEIVE UINT64_C(17)
+#define SYS_PROCESS_SPAWN UINT64_C(18)
+#define SYS_PROCESS_STATUS UINT64_C(19)
+#define SYS_PROCESS_KILL UINT64_C(20)
+#define SYS_OBJECT_WAIT UINT64_C(21)
+#define SYS_YIELD UINT64_C(22)
+#define SYS_SLEEP UINT64_C(23)
+#define SYS_CALL_COUNT 24u
+#define SIGNAL_EXITED UINT64_C(1)
+#define SIGNAL_READABLE UINT64_C(2)
+#define SIGNAL_WRITABLE UINT64_C(4)
+#define SIGNAL_PEER_CLOSED UINT64_C(8)
+#define LAUNCH_GRANTS 8u
+#define LAUNCH_ELF_BYTES 16384u
+struct launch_grant { uint64_t source, rights; };
+#define SYS_EPIPE (-INT64_C(16))
+#define SYS_ETIMEDOUT (-INT64_C(17))
 #define SYS_ENOENT (-INT64_C(8))
 #define SYS_EBUSY (-INT64_C(9))
 #define SYS_EFAULT (-INT64_C(10))

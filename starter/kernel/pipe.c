@@ -3,7 +3,13 @@
 #define PIPE_COUNT 4u
 #define PIPE_QUEUE 4u
 struct message { size_t size; unsigned char bytes[PIPE_FRAME]; };
-struct pipe_object { struct object object; unsigned used, head, count; struct message messages[PIPE_QUEUE]; };
+struct pipe_object;
+struct endpoint { struct object object; struct pipe_object *pipe; unsigned write; };
+struct pipe_object {
+    struct endpoint read, write;
+    unsigned used, reader_closed, writer_closed, head, count;
+    struct message messages[PIPE_QUEUE];
+};
 static struct pipe_object pipes[PIPE_COUNT];
 static unsigned u16(const unsigned char *p) { return p[0] | ((unsigned)p[1] << 8); }
 static uint32_t u32(const unsigned char *p) { return p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
@@ -49,19 +55,42 @@ static int64_t status(enum object_status s) {
     return s == OBJ_DENIED ? SYS_EACCESS : s == OBJ_FULL ? SYS_ENOSPC :
            s == OBJ_OVERFLOW ? SYS_EOVERFLOW : SYS_EBADHANDLE;
 }
-static void destroy(struct object *o) { ((struct pipe_object *)o)->used = 0; }
+static void destroy(struct object *o) {
+    struct endpoint *e = (struct endpoint *)o;
+    struct pipe_object *p = e->pipe;
+    if (e->write) p->writer_closed = 1; else p->reader_closed = 1;
+    if (p->reader_closed && p->writer_closed) p->used = 0;
+}
 int64_t pipe_create(struct handle_table *t, handle_t *read, handle_t *write) {
     *read = *write = 0; unsigned i;
     for (i = 0; i < PIPE_COUNT && pipes[i].used; i++) {}
     if (i == PIPE_COUNT) return SYS_ENOSPC;
     struct pipe_object *p = &pipes[i]; bytes_zero(p, sizeof(*p)); p->used = 1;
-    (void)object_init(&p->object, OBJECT_PIPE, destroy);
-    enum object_status s = handle_install(t, &p->object, CAP_READ | CAP_DUPLICATE | CAP_TRANSFER, read);
+    p->read.pipe = p->write.pipe = p; p->write.write = 1;
+    (void)object_init(&p->read.object, OBJECT_PIPE, destroy);
+    (void)object_init(&p->write.object, OBJECT_PIPE, destroy);
+    enum object_status s = handle_install(t, &p->read.object, CAP_READ | CAP_WAIT | CAP_DUPLICATE | CAP_TRANSFER, read);
     if (s == OBJ_OK) {
-        s = handle_install(t, &p->object, CAP_WRITE | CAP_DUPLICATE | CAP_TRANSFER, write);
+        s = handle_install(t, &p->write.object, CAP_WRITE | CAP_WAIT | CAP_DUPLICATE | CAP_TRANSFER, write);
         if (s != OBJ_OK) { (void)handle_close(t, *read); *read = 0; }
     }
-    object_put(&p->object); return s == OBJ_OK ? SYS_OK : status(s);
+    object_put(&p->read.object); object_put(&p->write.object);
+    return s == OBJ_OK ? SYS_OK : status(s);
+}
+/* The caller pins an endpoint with WAIT authority before polling its signals. */
+int64_t pipe_signals(struct object *o, uint64_t requested, uint64_t *observed) {
+    struct endpoint *e = (struct endpoint *)o; struct pipe_object *p = e->pipe;
+    uint64_t allowed = SIGNAL_PEER_CLOSED | (e->write ? SIGNAL_WRITABLE : SIGNAL_READABLE);
+    if (!requested || (requested & ~allowed)) return SYS_EINVAL;
+    uint64_t ready = 0;
+    if (e->write) {
+        if (p->reader_closed) ready |= SIGNAL_PEER_CLOSED;
+        else if (p->count < PIPE_QUEUE) ready |= SIGNAL_WRITABLE;
+    } else {
+        if (p->writer_closed) ready |= SIGNAL_PEER_CLOSED;
+        if (p->count || p->writer_closed) ready |= SIGNAL_READABLE;
+    }
+    *observed = ready & requested; return SYS_OK;
 }
 int64_t pipe_send(struct handle_table *t, handle_t h, const void *data, size_t n) {
     uint16_t type;
@@ -69,8 +98,9 @@ int64_t pipe_send(struct handle_table *t, handle_t h, const void *data, size_t n
     struct object *o;
     enum object_status s = handle_lookup(t, h, OBJECT_PIPE, CAP_WRITE, &o);
     if (s != OBJ_OK) return status(s);
-    struct pipe_object *p = (struct pipe_object *)o; int64_t result = SYS_OK;
-    if (p->count == PIPE_QUEUE) result = SYS_EAGAIN;
+    struct pipe_object *p = ((struct endpoint *)o)->pipe; int64_t result = SYS_OK;
+    if (p->reader_closed) result = SYS_EPIPE;
+    else if (p->count == PIPE_QUEUE) result = SYS_EAGAIN;
     else {
         struct message *m = &p->messages[(p->head + p->count) % PIPE_QUEUE];
         bytes_copy(m->bytes, data, n); m->size = n; p->count++;
@@ -81,8 +111,8 @@ int64_t pipe_receive(struct handle_table *t, handle_t h, void *data, size_t capa
     *done = 0; struct object *o;
     enum object_status s = handle_lookup(t, h, OBJECT_PIPE, CAP_READ, &o);
     if (s != OBJ_OK) return status(s);
-    struct pipe_object *p = (struct pipe_object *)o; int64_t result = SYS_OK;
-    if (!p->count) result = SYS_EAGAIN;
+    struct pipe_object *p = ((struct endpoint *)o)->pipe; int64_t result = SYS_OK;
+    if (!p->count) result = p->writer_closed ? SYS_OK : SYS_EAGAIN;
     else {
         struct message *m = &p->messages[p->head];
         if (expected != u16(m->bytes + 2)) result = SYS_EFORMAT;

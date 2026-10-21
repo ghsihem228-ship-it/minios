@@ -15,8 +15,8 @@ struct user_execution {
 extern struct user_execution *current_user;
 #define user_context (*current_user)
 #define USER_PROCESSES 4u
-enum user_state { USER_FREE, USER_READY, USER_RUNNING, USER_EXITED };
-struct user_info { uint64_t pid, slices; int64_t result; enum user_state state; };
+enum user_state { USER_FREE, USER_READY, USER_RUNNING, USER_EXITED, USER_WAITING };
+struct user_info { uint64_t pid, slices; int64_t result; enum user_state state; unsigned managed; };
 int64_t user_spawn(const void *elf, size_t, struct ramfs *, cap_rights_t, uint64_t *pid);
 void user_poll(void); /* At most one timer slice, except an exclusive transaction. */
 int64_t user_kill(uint64_t pid);
@@ -27,6 +27,7 @@ int user_process_selftest(void);
 int64_t user_run(const void *elf, size_t, struct ramfs *, cap_rights_t initial_rights);
 int user_fault(struct interrupt_frame *);
 void user_finish(struct interrupt_frame *, int64_t);
+int process_services(struct interrupt_frame *, struct syscall_result *);
 int services_dispatch(struct interrupt_frame *, struct syscall_result *);
 int user_selftest(void);
 struct ramfs *user_filesystem(void);

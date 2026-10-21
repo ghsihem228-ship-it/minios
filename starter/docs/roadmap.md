@@ -10,26 +10,27 @@ Each milestone needs implementation, negative tests and a reviewed ABI contract.
 
 1. **Extend the process foundation.** Private CR3 roots, timer-preempted user
    execution, x87/XMM state, trusted launch/kill/reap and cleanup are implemented
-   in [milestone 15](15-processes.md). Still needed: capability-based public process
-   handles/syscalls, threads, blocking waits/sleep, startup arguments, TLS, richer
+   in [milestone 15](15-processes.md). Public process capabilities, waits/sleep and
+   child grants are implemented in [milestone 16](16-process-ipc.md). Still needed:
+   threads, startup arguments, TLS, richer
    resource accounting and kernel-thread integration.
-2. **Service IPC and waits.** Blocking channels/wait sets, endpoint closure,
-   backpressure, handle transfer with rights attenuation, cancellation, quotas
-   and process-local authority. Typed message validation already exists but is
-   not a complete user-service transport.
+2. **Service IPC and waits.** Multi-object wait sets, runtime handle transfer, per-process quotas
+   and service discovery. Typed endpoints now support blocking readiness, EOF,
+   bounded backpressure, cancellation and attenuated launch grants.
 3. **Hybrid services and drivers.** Move filesystem policy, networking and drivers
    behind capability-scoped services. Establish device/MMIO/IRQ grants and DMA
    isolation policy. Current RAMFS, ATA and console live in the kernel.
 4. **Storage and executable loading.** Scalable filesystem and directories,
-   disk-backed ELF execution, reliable allocation/recovery, richer failure
+   larger executables, reliable allocation/recovery, richer failure
    injection and runtime program installation. Current whole-namespace snapshots
-   only hold eight 2 KiB files; only embedded ELF programs can run.
+   only hold eight 2 KiB files; compact disk ELF execution is implemented in
+   [milestone 17](17-disk-exec.md).
 5. **Network stack.** Device discovery, a tested NIC driver/service, Ethernet,
    ARP/IPv4, UDP/TCP, DNS, bounded retransmission and capability-owned sockets.
    No network device is attached by the x64 default launch targets today.
 6. **Developer environment and POSIX.** Explicit process startup arguments and
    environment, runtime/library coverage, process/file semantics, pipes with
-   EOF/blocking, toolchain port and compatibility testing. The present source
+   libc integration for EOF/blocking, toolchain port and compatibility testing. The present source
    subset does not run existing Unix binaries.
 7. **Transactions and installation.** Process-family snapshots, coordination with
    services, persistent install staging, conflict/resource accounting and a clear
@@ -43,5 +44,5 @@ Each milestone needs implementation, negative tests and a reviewed ABI contract.
    compatibility negotiation and long-term ABI tests. The current small ABI is
    documented; do not manufacture placeholder syscalls to reach a call count.
 
-Near-term priority: capability-based process handles and user-service IPC with
-wait/closure semantics. These support the requested hybrid architecture.
+Near-term priority: a user-space service supervisor, runtime handle transfer and
+scalable storage. The process/IPC foundation now supports isolated child services.

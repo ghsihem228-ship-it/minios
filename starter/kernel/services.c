@@ -6,10 +6,10 @@ static int64_t output_range(uint64_t address, size_t length) {
     if (!vm_user_check(address, length, 1)) return SYS_EFAULT;
     return vm_user_prepare(address, length) ? SYS_OK : SYS_ENOMEM;
 }
-static const unsigned arguments[18] = {1,1,1,2,2,2,1,5,3,3,2,3,1,0,0,1,3,4};
+static const unsigned arguments[SYS_CALL_COUNT] = {1,1,1,2,2,2,1,5,3,3,2,3,1,0,0,1,3,4,4,1,1,3,0,1};
 int services_dispatch(struct interrupt_frame *f, struct syscall_result *result) {
     uint64_t number = f->rax;
-    if (number < SYS_EXIT || number > SYS_PIPE_RECEIVE) return 0;
+    if (number < SYS_EXIT || number >= SYS_CALL_COUNT) return 0;
     *result = (struct syscall_result){SYS_EINVAL, 0};
     uint64_t a[6] = {f->rdi, f->rsi, f->rdx, f->r10, f->r8, f->r9};
     for (unsigned i = arguments[number]; i < 6; i++) if (a[i]) return 1;
@@ -20,6 +20,7 @@ int services_dispatch(struct interrupt_frame *f, struct syscall_result *result) 
         number != SYS_FS_READ && number != SYS_FS_WRITE && number != SYS_FS_SEEK) {
         result->status = SYS_EBUSY; return 1;
     }
+    if (number >= SYS_PROCESS_SPAWN) return process_services(f, result);
     unsigned char buffer[FS_BYTES]; size_t done = 0; int64_t status = SYS_EINVAL;
     if (number == SYS_FS_OPEN) {
         if (!a[2] || a[2] > FS_NAME || a[4] > 1) goto done;

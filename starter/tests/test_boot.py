@@ -16,7 +16,7 @@ BOOT = (b'Hello\r\nIDT ready: 256 gates; TSS/IST ready\r\n'
         b'PASS PMM: memory map, ownership, exhaustion/reuse\r\n'
         b'PASS VMM: 4 KiB, W^X, NULL/stack guards, map/unmap\r\n'
         b'PASS PIT: IRQ0 ticking at ~100 Hz\r\n')
-READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS processes: private CR3, timer preemption, integer/x87/XMM state, kill/reap\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\nMiniOS64 shell. Type help. Use save to keep files.\r\nx64> '
+READY = BOOT + b'PASS scheduler: yield, sleep, exit, capacity, reuse\r\n' + b'PASS handles: types, references, stale tokens, capacity, retirement\r\n' + b'PASS syscalls: INT80, registers, ABI, handles, rejection\r\n' + b'PASS capabilities: rights, attenuation, delegation, launch rollback\r\n' + b'PASS processes: private CR3, timer preemption, integer/x87/XMM state, kill/reap\r\n' + b'PASS IPC: child grants, process handles, blocking waits, EOF, cancellation\r\n' + b'PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\r\n' + b'READY: interrupts enabled; idle\r\nMiniOS64 shell. Type help. Use save to keep files.\r\nx64> '
 
 
 def symbols(image):
@@ -159,7 +159,8 @@ def check_memory(vm, names, registers):
     root, = struct.unpack('<Q', vm.memory(names['root_physical'], 8))
     assert reg(registers, 'CR3') == root
     count, = struct.unpack('<I', vm.memory(names['frame_count'], 4))
-    states = vm.memory(names['frames'], count)
+    packed = vm.memory(names['frames'], (count + 1) // 2)
+    states = bytes((packed[n // 2] >> (4 * (n & 1))) & 15 for n in range(count))
     free, = struct.unpack('<Q', vm.memory(names['free_frames'], 8))
     assert states.count(1) == free and free > 0
     assert states.count(2) == 0 and states.count(4) == 1
@@ -365,7 +366,7 @@ def module(qemu):
             start, end = struct.unpack_from('<II', vm.memory(table, 16))
             assert end - start == len(payload) and vm.memory(start, len(payload)) == payload
             for frame in range(start // 4096, (end + 4095) // 4096):
-                assert vm.memory(names['frames'] + frame, 1) == b'\0'
+                assert (vm.memory(names['frames'] + frame // 2, 1)[0] >> (4 * (frame & 1))) & 15 == 0
             check_memory(vm, names, vm.registers())
             assert vm.output() == READY
     print('PASS Multiboot module: partial edge frames reserved and payload preserved')

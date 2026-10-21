@@ -283,3 +283,7 @@ tested; neither are actual machine-check delivery/recovery or SMP TLB shootdowns
 Step 3 ends here. Wait for explicit **next** before step 4 (scheduler). Keep the
 later object/handle, syscall, capability and other features in their requested
 order rather than implementing them automatically.
+
+## Subsequent implementation
+
+Frame metadata now uses four bits per frame (128 KiB for the 1 GiB ceiling), preserving the existing ownership states and 2 MiB boot support.

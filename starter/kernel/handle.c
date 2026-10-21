@@ -39,6 +39,16 @@ enum object_status handle_lookup(struct handle_table *t, handle_t h,
     if (status == OBJ_OK) *out = s->object;
     return status;
 }
+enum object_status handle_pin(struct handle_table *t, handle_t h, cap_rights_t rights, struct object **out) {
+    *out = NULL;
+    if (rights & ~CAP_ALL) return OBJ_INVALID;
+    struct handle_slot *s = find(t, h);
+    if (!s) return OBJ_INVALID;
+    if ((s->rights & rights) != rights) return OBJ_DENIED;
+    enum object_status result = object_get(s->object);
+    if (result == OBJ_OK) *out = s->object;
+    return result;
+}
 enum object_status handle_duplicate(struct handle_table *t, handle_t h, handle_t *out) {
     struct handle_slot *s = find(t, h);
     if (!s) { if (out) *out = HANDLE_INVALID; return OBJ_INVALID; }

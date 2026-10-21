@@ -178,3 +178,7 @@ blocking wait/sleep, TLS, XSAVE/AVX support, user-service IPC, or a complete POS
 process model. Resource policy, transient-execution mitigations and formal
 isolation proofs remain work. Interrupt delivery and hardware state must be
 reviewed again before adding new CPU features or arbitrary third-party binaries.
+
+## Subsequent implementation
+
+Milestone 16 adds public process capabilities, attenuated child grants, sleep and blocking object waits; the ABI reference describes the current contract.

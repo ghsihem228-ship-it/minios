@@ -26,7 +26,9 @@ void syscall_dispatch(struct interrupt_frame *f) {
         uint64_t required = number == SYS_HANDLE_DUPLICATE ? CAP_DUPLICATE :
                             number == SYS_HANDLE_CLONE ? CAP_DUPLICATE | args[1] :
                             number == SYS_HANDLE_RESTRICT ? args[1] :
-                            number == SYS_TX_BEGIN ? CAP_CONTROL : number == SYS_FS_WRITE || number == SYS_FS_UNLINK || number == SYS_PIPE_SEND ? CAP_WRITE :
+                            number == SYS_PROCESS_SPAWN ? CAP_TRANSFER :
+                            number == SYS_PROCESS_STATUS || number == SYS_OBJECT_WAIT ? CAP_WAIT :
+                            number == SYS_TX_BEGIN || number == SYS_PROCESS_KILL ? CAP_CONTROL : number == SYS_FS_WRITE || number == SYS_FS_UNLINK || number == SYS_PIPE_SEND ? CAP_WRITE :
                             number == SYS_FS_READ || number == SYS_PIPE_RECEIVE ? CAP_READ : number == SYS_FS_OPEN ? CAP_READ | args[3] | (args[4] ? CAP_WRITE : 0) : 0;
         error_record(error, r.status, number, required);
     }

@@ -3,16 +3,16 @@
 #include "bytes.h"
 static struct ramfs filesystem;
 #define ELF(n) extern const unsigned char user_elf_##n[], user_elf_##n##_end[];
-ELF(0) ELF(1) ELF(2) ELF(3) ELF(4) ELF(5) ELF(6) ELF(7) ELF(8) ELF(9) ELF(10) ELF(11)
+ELF(0) ELF(1) ELF(2) ELF(3) ELF(4) ELF(5) ELF(6) ELF(7) ELF(8) ELF(9) ELF(10) ELF(11) ELF(12)
 struct ramfs *user_filesystem(void) { return &filesystem; }
-static const unsigned char *const images[] = {user_elf_0,user_elf_1,user_elf_2,user_elf_3,user_elf_4,user_elf_5,user_elf_6,user_elf_7,user_elf_8,user_elf_9,user_elf_10,user_elf_11};
-static const unsigned char *const ends[] = {user_elf_0_end,user_elf_1_end,user_elf_2_end,user_elf_3_end,user_elf_4_end,user_elf_5_end,user_elf_6_end,user_elf_7_end,user_elf_8_end,user_elf_9_end,user_elf_10_end,user_elf_11_end};
+static const unsigned char *const images[] = {user_elf_0,user_elf_1,user_elf_2,user_elf_3,user_elf_4,user_elf_5,user_elf_6,user_elf_7,user_elf_8,user_elf_9,user_elf_10,user_elf_11,user_elf_12};
+static const unsigned char *const ends[] = {user_elf_0_end,user_elf_1_end,user_elf_2_end,user_elf_3_end,user_elf_4_end,user_elf_5_end,user_elf_6_end,user_elf_7_end,user_elf_8_end,user_elf_9_end,user_elf_10_end,user_elf_11_end,user_elf_12_end};
 int64_t user_demo_spawn(unsigned index, uint64_t *pid) {
-    if (index >= 12) return SYS_ENOENT;
+    if (index >= 13) return SYS_ENOENT;
     return user_spawn(images[index], (size_t)(ends[index] - images[index]), index == 6 ? NULL : &filesystem, index == 6 ? 0 : CAP_ALL, pid);
 }
 int64_t user_demo_run(unsigned index) {
-    if (index >= 12) return SYS_ENOENT;
+    if (index >= 13) return SYS_ENOENT;
     return user_run(images[index], (size_t)(ends[index] - images[index]), index == 6 ? NULL : &filesystem, index == 6 ? 0 : CAP_ALL);
 }
 int user_selftest(void) {
@@ -31,6 +31,7 @@ int user_selftest(void) {
     if (!bytes_equal(filesystem.image.nodes[0].data, "commit", 6)) return 220;
     result = user_run(user_elf_6, (size_t)(user_elf_6_end - user_elf_6), NULL, 0);
     if (result || pmm_free_count() != before || filesystem.root.refs != 1) return 221;
+    RUN(12, 0);
     return 0;
 }
 

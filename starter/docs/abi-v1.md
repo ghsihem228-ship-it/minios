@@ -1,4 +1,4 @@
-# Current scalar syscall ABI: x86_64 v1.2
+# Current scalar syscall ABI: x86_64 v1.3
 
 This is the current implementation contract. Earlier milestone notes describe
 historical versions. The calling convention is shared between kernel test callers
@@ -16,7 +16,7 @@ bytes only; no kernel pointers or native backend structures cross the boundary.
 
 | No. | Name | Arguments | Success value |
 | --- | --- | --- | --- |
-| 0 | ABI_QUERY | required_major=1 | `(1 << 32) \| 2` |
+| 0 | ABI_QUERY | required_major=1 | `(1 << 32) \| 3` |
 | 1 | HANDLE_CLOSE | handle | 0 |
 | 2 | HANDLE_DUPLICATE | source | same-rights handle; source requires DUPLICATE |
 | 3 | HANDLE_RESTRICT | handle, subset_mask | 0; local irreversible restriction |
@@ -33,9 +33,15 @@ bytes only; no kernel pointers or native backend structures cross the boundary.
 | 14 | TX_ROLLBACK | none | resumes successful BEGIN with value 1 |
 | 15 | PIPE_CREATE | output_ptr_to_two_u64_handles | 0 |
 | 16 | PIPE_SEND | write_handle, frame_ptr, frame_size | 0 |
-| 17 | PIPE_RECEIVE | read_handle, output_ptr, capacity, expected_type | frame size |
+| 17 | PIPE_RECEIVE | read_handle, output_ptr, capacity, expected_type | frame size; 0 at EOF |
+| 18 | PROCESS_SPAWN | elf_ptr, elf_bytes, grants_ptr, grant_count | process handle |
+| 19 | PROCESS_STATUS | process_handle | signed exit result encoded as u64; requires WAIT |
+| 20 | PROCESS_KILL | process_handle | 0; requires CONTROL |
+| 21 | OBJECT_WAIT | handle, signal_mask, timeout_ticks | observed signals; requires WAIT |
+| 22 | YIELD | none | 0 |
+| 23 | SLEEP | ticks | 0 |
 
-The first pipe handle is READ, second WRITE; the 16-byte output contains little-
+The first pipe handle has READ, second WRITE; both also have WAIT, DUPLICATE and TRANSFER; the 16-byte output contains little-
 endian native u64 tokens. Creation validates/prepares that output before installing
 handles. It does not implicitly transfer them to another user process.
 
@@ -54,13 +60,15 @@ handles. It does not implicitly transfer them to another user process.
 | -8 | ENOENT | scoped name not found |
 | -9 | EBUSY | open object, active/forbidden transaction operation |
 | -10 | EFAULT | invalid/unwritable user buffer |
-| -11 | EAGAIN | empty/full nonblocking pipe |
-| -12 | EFORMAT | malformed typed frame or unexpected message type |
+| -11 | EAGAIN | resource not ready: pipe, process status or zero-timeout wait |
+| -12 | EFORMAT | malformed ELF, typed frame or unexpected message type |
 | -13 | ECONFLICT | transaction baseline revision changed |
 | -14 | ENOMEM | COW output preparation cannot allocate a frame |
 | -15 | EIO | disk snapshot I/O failed (kernel storage interface; no raw-disk syscall) |
+| -16 | EPIPE | last reader closed |
+| -17 | ETIMEDOUT | wait deadline expired |
 
-Loader/runner failures are trusted kernel API results rather than user syscalls:
+Loader failures are also returned by PROCESS_SPAWN. Process results include:
 bad ELF returns EFORMAT, frame/table allocation failure ENOMEM, process-pool
 exhaustion ENOSPC, a user fault `-1000-vector`, the delivered-tick watchdog -2000,
 and trusted kill -2001. Unknown user call numbers always return
@@ -82,8 +90,9 @@ four isolated user processes, sixteen user page slots per process (14 loadable,
 one guard, one stack), and one globally exclusive filesystem transaction. Open/unlink/handle and pipe effects are forbidden during a transaction;
 read/write/seek, queries, commit/rollback and terminating exit remain allowed.
 
-There is no public process-creation syscall, kernel-pointer input, arbitrary
-recipient selector, dynamic schema RPC, runtime exec or Linux-number compatibility.
+There is no kernel-pointer input, arbitrary recipient selector, dynamic schema RPC,
+in-place exec or Linux-number compatibility. The trusted shell can load small
+disk files with runfile; PROCESS_SPAWN accepts ELF bytes from the caller.
 Existing numbers/argument meanings must not be silently repurposed. Append new
 calls and increment minor for compatible extensions; incompatible evolution needs
 an explicitly designed major-version coexistence policy before a general release.
@@ -92,4 +101,22 @@ Process scheduling and CPU state are specified in [milestone 15](15-processes.md
 x87/MMX/XMM/MXCSR state is private across slices; transaction rollback restores
 its BEGIN checkpoint. AVX/XSAVE and TLS/FS/GS-base APIs are unsupported. Foreground
 `run` has a 200-slice watchdog; background jobs are controlled by the trusted shell.
-The user ABI still has no process-creation, PID control or raw address-space syscall.
+Process handles and launch grants are specified in [milestone 16](16-process-ipc.md).
+No public PID lookup or raw address-space syscall exists. A grant is two u64 words:
+source handle and attenuated rights. At most eight grants and 16384 ELF bytes are
+accepted. Sources require TRANSFER. The child receives RDI=0, RSI=handle-vector
+address, RDX=count, with no ambient root. Launch failure rolls back all grants,
+frames and output handles. Closing a process handle does not kill its process.
+
+OBJECT_WAIT signals are EXITED=1 (process), READABLE=2 (read endpoint), WRITABLE=4
+(write endpoint), PEER_CLOSED=8 (either endpoint). Unsupported masks are EINVAL.
+Timeout 0 polls; UINT64_MAX waits indefinitely; other timeouts and SLEEP must be
+at most UINT64_MAX/2 ticks. Readiness wins over an expired timeout. Signals are
+level-triggered and do not reserve data. Wait for WRITABLE|PEER_CLOSED on writers.
+A read endpoint becomes readable at EOF, after queued frames drain. A writer
+returns EPIPE when all reader references close. Duplicates and active waits keep
+endpoints alive. Process kill cancels a blocked wait and releases its pin.
+Self-wait is invalid and self-kill is denied (use EXIT). Exited children retain
+status until the last process capability closes, consuming a process slot.
+Public children can use explicitly granted files/directories, but TX_BEGIN still
+requires the trusted launch namespace and is unavailable to these children.

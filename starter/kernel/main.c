@@ -81,6 +81,7 @@ void kernel_main(uint32_t boot_info) {
         for (;;) __asm__ volatile ("cli; hlt");
     }
     (void)serial_write("PASS processes: private CR3, timer preemption, integer/x87/XMM state, kill/reap\n");
+    (void)serial_write("PASS IPC: child grants, process handles, blocking waits, EOF, cancellation\n");
     (void)serial_write("PASS extended: errors, RAMFS, ELF64/ring3, POSIX subset, COW undo, typed pipes\n");
     (void)serial_write("READY: interrupts enabled; idle\n");
     shell_run();

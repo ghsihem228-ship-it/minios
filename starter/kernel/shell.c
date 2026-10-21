@@ -77,6 +77,22 @@ static void execute(char *line) {
         }
         return;
     }
+    if (same(command, "runfile")) {
+        if (!name || *rest) { say("Usage: runfile <name>\n"); return; }
+        unsigned char image[FS_BYTES]; size_t size; handle_t file;
+        int64_t status = fs_open(&files, root, name, length(name), CAP_READ, 0, &file);
+        if (!status) {
+            status = fs_read(&files, file, image, sizeof(image), &size);
+            (void)handle_close(&files, file);
+            if (!status) {
+                status = user_run(image, size, filesystem, CAP_ALL);
+                say("[exit] "); if (status < 0) say("-");
+                number(status < 0 ? UINT64_C(0) - (uint64_t)status : (uint64_t)status); say("\n");
+                return;
+            }
+        }
+        result(status); return;
+    }
     if (same(command, "kill")) {
         uint64_t pid = 0;
         if (!name || !*name || *rest) { say("Usage: kill <pid>\n"); return; }
@@ -91,10 +107,10 @@ static void execute(char *line) {
         return;
     }
     if (same(command, "run") || same(command, "spawn")) {
-        static const char *const programs[] = {"demo", "fault", "io", "spin", "nx", "interrupt", "empty", "abort", "readonly", "probe-a", "probe-b", "txspin"};
+        static const char *const programs[] = {"demo", "fault", "io", "spin", "nx", "interrupt", "empty", "abort", "readonly", "probe-a", "probe-b", "txspin", "ipc"};
         unsigned i;
-        for (i = 0; i < 12; i++) if (name && same(name, programs[i])) break;
-        if (i == 12 || *rest) { say("Usage: run demo|fault|io|spin|nx|interrupt|empty|abort|readonly|probe-a|probe-b|txspin\n"); return; }
+        for (i = 0; i < 13; i++) if (name && same(name, programs[i])) break;
+        if (i == 13 || *rest) { say("Usage: run demo|fault|io|spin|nx|interrupt|empty|abort|readonly|probe-a|probe-b|txspin|ipc\n"); return; }
         if (same(command, "spawn")) {
             uint64_t pid; int64_t status = user_demo_spawn(i, &pid); result(status);
             if (!status) { say("Spawned pid="); number(pid); say("\n"); }
@@ -108,9 +124,9 @@ static void execute(char *line) {
     }
     if (name) { say("Unexpected arguments\n"); return; }
     if (same(command, "help")) {
-        say("MiniOS64 commands:\nhelp clear version mem uptime ls disk save\ncat <name> | write <name> <text> | rm <name>\nprograms | run <program> | spawn <program> | ps | kill <pid>\n");
+        say("MiniOS64 commands:\nhelp clear version mem uptime ls disk save\ncat <name> | write <name> <text> | rm <name>\nrunfile <name> | programs | run <program> | spawn <program> | ps | kill <pid>\n");
         say("Use save to persist files on a dedicated disk. Names are relative; no slash or dot-dot.\n");
-    } else if (same(command, "version")) say("MiniOS64 x86_64 experimental kernel; ABI 1.2\n");
+    } else if (same(command, "version")) say("MiniOS64 x86_64 experimental kernel; ABI 1.3\n");
     else if (same(command, "clear")) console_clear();
     else if (same(command, "uptime")) { say("Delivered timer ticks="); number(timer_now()); say(" (~100 Hz)\n"); }
     else if (same(command, "mem")) { say("Frames free="); number(pmm_free_count()); say(" managed="); number(pmm_frame_count()); say("\n"); }
@@ -124,11 +140,11 @@ static void execute(char *line) {
     else if (same(command, "ps")) {
         unsigned count = 0; struct user_info info;
         for (unsigned i = 0; i < USER_PROCESSES; i++) if (user_info(i, &info)) {
-            say("pid="); number(info.pid); say(" ready slices="); number(info.slices); say("\n"); count++;
+            say("pid="); number(info.pid); say(info.state == USER_WAITING ? " waiting slices=" : info.state == USER_EXITED ? " exited slices=" : " ready slices="); number(info.slices); say("\n"); count++;
         }
         if (!count) say("(no user processes)\n");
     }
-    else if (same(command, "programs")) say("demo fault io spin nx interrupt empty abort readonly probe-a probe-b txspin\n");
+    else if (same(command, "programs")) say("demo fault io spin nx interrupt empty abort readonly probe-a probe-b txspin ipc\n");
     else if (same(command, "ls")) {
         unsigned count = 0;
         for (unsigned i = 0; i < FS_FILES; i++) {
@@ -154,7 +170,7 @@ _Noreturn void shell_run(void) {
          * Retain a termination message; process IDs are never reused. */
         struct user_info info;
         for (unsigned i = 0; i < USER_PROCESSES; i++) {
-            if (user_info(i, &info) && info.state == USER_EXITED) {
+            if (user_info(i, &info) && info.state == USER_EXITED && !info.managed) {
                 int64_t code; (void)user_reap(info.pid, &code);
                 say("\n[process "); number(info.pid); say("] exit=");
                 if (code < 0) say("-");

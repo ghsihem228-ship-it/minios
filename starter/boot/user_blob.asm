@@ -48,4 +48,8 @@ global user_elf_11, user_elf_11_end
 user_elf_11:
 incbin "build/user-11.embed.elf"
 user_elf_11_end:
+global user_elf_12, user_elf_12_end
+user_elf_12:
+incbin "build/user-12.embed.elf"
+user_elf_12_end:
 section .note.GNU-stack noalloc noexec nowrite progbits

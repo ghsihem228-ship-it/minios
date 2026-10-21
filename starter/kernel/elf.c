@@ -29,8 +29,9 @@ int elf_validate(const void *data, size_t size, struct elf_plan *out) {
         if (p.type != 1 || !p.memsz || p.va < BASE || p.va >= LIMIT || p.memsz > LIMIT - p.va ||
             p.filesz > p.memsz || p.offset > size || p.filesz > size - p.offset ||
             (p.flags & ~7u) || !(p.flags & 4) || ((p.flags & 3) == 3) ||
-            (p.va & 4095) || (p.offset & 4095) ||
-            (p.align > 4096) || (p.align && (p.align & (p.align - 1)))) return 0;
+            (p.va & 4095) ||
+            (p.align > 4096) || (p.align && (p.align & (p.align - 1))) ||
+            (p.align > 1 && ((p.va - p.offset) & (p.align - 1)))) return 0;
         uint64_t end = (p.va + p.memsz + 4095) & ~UINT64_C(4095);
         for (unsigned j = 0; j < plan.count; j++) {
             struct elf_segment *s = &plan.segments[j];
