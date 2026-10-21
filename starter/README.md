@@ -98,6 +98,7 @@ the later guides and [current ABI](docs/abi-v1.md) supersede earlier API version
 | 15 | [Isolated, timer-preempted user processes](docs/15-processes.md) |
 | 16 | [Process capabilities, child grants and blocking IPC](docs/16-process-ipc.md) |
 | 17 | [Disk-backed ELF execution](docs/17-disk-exec.md) |
+| 18 | [Multi-object service waits](docs/18-wait-many.md) |
 
 Try the real parent/child service with `run ipc`. To execute a program from a
 new, separately seeded snapshot image:
@@ -160,8 +161,8 @@ docs/                design/specification for each milestone, current syscall AB
   durable disk transactions, external-effect reversal or nested checkpoints.
 - Typed sends/receives are bounded/nonblocking, with EOF and blocking readiness waits.
   Public child creation transfers attenuated startup grants; runtime handle messages
-  and multi-object wait sets remain unimplemented.
-- ABI v1.3 currently defines twenty-four calls. Do not invent dozens of placeholder calls
+  remain unimplemented; wait-any now supports up to eight objects.
+- ABI v1.4 currently defines twenty-five calls. Do not invent dozens of placeholder calls
   merely to hit a target count. Extending/finalizing the full public ABI needs real
   services and compatibility review.
 

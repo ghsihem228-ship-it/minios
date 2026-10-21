@@ -4,7 +4,7 @@
 #include "capability.h"
 /* INT80 ABI; user gate enabled only during a controlled CPL3 dispatch. */
 #define SYS_ABI_MAJOR UINT64_C(1)
-#define SYS_ABI_VERSION ((SYS_ABI_MAJOR << 32) | UINT64_C(3))
+#define SYS_ABI_VERSION ((SYS_ABI_MAJOR << 32) | UINT64_C(4))
 #define SYS_ABI_QUERY UINT64_C(0)
 #define SYS_HANDLE_CLOSE UINT64_C(1)
 #define SYS_HANDLE_DUPLICATE UINT64_C(2)
@@ -30,7 +30,10 @@
 #define SYS_OBJECT_WAIT UINT64_C(21)
 #define SYS_YIELD UINT64_C(22)
 #define SYS_SLEEP UINT64_C(23)
-#define SYS_CALL_COUNT 24u
+#define SYS_WAIT_MANY UINT64_C(24)
+#define SYS_CALL_COUNT 25u
+#define WAIT_ITEMS 8u
+struct wait_item { uint64_t handle, signals; };
 #define SIGNAL_EXITED UINT64_C(1)
 #define SIGNAL_READABLE UINT64_C(2)
 #define SIGNAL_WRITABLE UINT64_C(4)

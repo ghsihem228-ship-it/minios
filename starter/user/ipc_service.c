@@ -12,8 +12,12 @@ int user_main(uint64_t root, const uint64_t *grants, uint64_t count) {
     CHECK(call(SYS_HANDLE_DUPLICATE, grants[0], 0, 0, 0).status == SYS_EACCESS, 84);
     CHECK(call(SYS_SLEEP, 3, 0, 0, 0).status == 0, 85);
     for (;;) {
-        struct syscall_result r = call(SYS_OBJECT_WAIT, grants[0], SIGNAL_READABLE, 200, 0);
-        CHECK(!r.status && (r.value & SIGNAL_READABLE), 86);
+        struct wait_item items[2] = {{grants[0], SIGNAL_READABLE}, {grants[1], SIGNAL_PEER_CLOSED}};
+        uint64_t ready;
+        CHECK(!mini_wait_many(items, 2, UINT64_MAX, &ready), 86);
+        if (ready & 2) return 0;
+        CHECK(ready & 1, 92);
+        struct syscall_result r;
         r = call(SYS_PIPE_RECEIVE, grants[0], (uintptr_t)message, sizeof(message), 1);
         CHECK(!r.status, 87);
         if (!r.value) break;

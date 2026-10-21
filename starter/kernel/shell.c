@@ -126,7 +126,7 @@ static void execute(char *line) {
     if (same(command, "help")) {
         say("MiniOS64 commands:\nhelp clear version mem uptime ls disk save\ncat <name> | write <name> <text> | rm <name>\nrunfile <name> | programs | run <program> | spawn <program> | ps | kill <pid>\n");
         say("Use save to persist files on a dedicated disk. Names are relative; no slash or dot-dot.\n");
-    } else if (same(command, "version")) say("MiniOS64 x86_64 experimental kernel; ABI 1.3\n");
+    } else if (same(command, "version")) say("MiniOS64 x86_64 experimental kernel; ABI 1.4\n");
     else if (same(command, "clear")) console_clear();
     else if (same(command, "uptime")) { say("Delivered timer ticks="); number(timer_now()); say(" (~100 Hz)\n"); }
     else if (same(command, "mem")) { say("Frames free="); number(pmm_free_count()); say(" managed="); number(pmm_frame_count()); say("\n"); }

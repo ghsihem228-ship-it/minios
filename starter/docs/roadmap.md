@@ -14,9 +14,10 @@ Each milestone needs implementation, negative tests and a reviewed ABI contract.
    child grants are implemented in [milestone 16](16-process-ipc.md). Still needed:
    threads, startup arguments, TLS, richer
    resource accounting and kernel-thread integration.
-2. **Service IPC and waits.** Multi-object wait sets, runtime handle transfer, per-process quotas
+2. **Service IPC and waits.** Runtime handle transfer, per-process quotas
    and service discovery. Typed endpoints now support blocking readiness, EOF,
    bounded backpressure, cancellation and attenuated launch grants.
+   [Multi-object wait-any](18-wait-many.md) now supports up to eight objects.
 3. **Hybrid services and drivers.** Move filesystem policy, networking and drivers
    behind capability-scoped services. Establish device/MMIO/IRQ grants and DMA
    isolation policy. Current RAMFS, ATA and console live in the kernel.

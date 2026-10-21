@@ -56,7 +56,7 @@ def run(qemu, ram):
             command('kill ' + str(pid), b'Killed process')
         command('ps', b'(no user processes)')
         assert free() == initial
-        print(f'PASS IPC QEMU: {ram} MiB; 32 typed RPCs/run, attenuated startup grants, wait/timeout/EOF, process controls, killed waiters, orphan cleanup and CPU competition', flush=True)
+        print(f'PASS IPC QEMU: {ram} MiB; 32 typed RPCs/run, attenuated startup grants, multi-object wait/timeout/EOF, process controls, killed waiters, orphan cleanup and CPU competition', flush=True)
     finally:
         try:
             uart.shutdown(socket.SHUT_RDWR)

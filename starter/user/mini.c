@@ -98,3 +98,9 @@ int mini_yield(void) {
     struct syscall_result r = syscall_invoke(SYS_YIELD, 0, 0, 0, 0, 0, 0);
     return r.status ? fail(r.status) : 0;
 }
+
+int mini_wait_many(const struct wait_item *items, size_t count, uint64_t ticks, uint64_t *ready) {
+    struct syscall_result r = syscall_invoke(SYS_WAIT_MANY, (uintptr_t)items, count, ticks, 0, 0, 0);
+    *ready = r.value;
+    return r.status ? fail(r.status) : 0;
+}

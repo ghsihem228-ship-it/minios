@@ -21,6 +21,7 @@ int mini_spawn(const void *, size_t, const struct launch_grant *, size_t, uint64
 int mini_process_status(uint64_t process, int64_t *code);
 int mini_kill(uint64_t process);
 int mini_wait(uint64_t handle, uint64_t signals, uint64_t ticks, uint64_t *observed);
+int mini_wait_many(const struct wait_item *, size_t, uint64_t ticks, uint64_t *ready);
 int mini_sleep(uint64_t ticks);
 int mini_yield(void);
 size_t mini_error(char *, size_t);

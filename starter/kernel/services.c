@@ -6,7 +6,7 @@ static int64_t output_range(uint64_t address, size_t length) {
     if (!vm_user_check(address, length, 1)) return SYS_EFAULT;
     return vm_user_prepare(address, length) ? SYS_OK : SYS_ENOMEM;
 }
-static const unsigned arguments[SYS_CALL_COUNT] = {1,1,1,2,2,2,1,5,3,3,2,3,1,0,0,1,3,4,4,1,1,3,0,1};
+static const unsigned arguments[SYS_CALL_COUNT] = {1,1,1,2,2,2,1,5,3,3,2,3,1,0,0,1,3,4,4,1,1,3,0,1,3};
 int services_dispatch(struct interrupt_frame *f, struct syscall_result *result) {
     uint64_t number = f->rax;
     if (number < SYS_EXIT || number >= SYS_CALL_COUNT) return 0;

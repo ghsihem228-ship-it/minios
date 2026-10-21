@@ -78,3 +78,19 @@ to existing boot, fault, memory, process, shell and storage regressions:
 
 These tests validate the documented bounded interfaces, not general Unix binary
 compatibility, user-space drivers, a network stack or a complete desktop OS.
+
+## Multi-object waits (2026-10-21)
+
+The ring-3 IPC suite passes at 2/16/64 MiB with WAIT_MANY: eight-entry ready
+bitmaps, duplicate entries, mixed process/pipe waits, poll/timeout, denied rights,
+invalid later entries, asynchronous replies, EOF and killed infinite waiters.
+Repeated service runs and competing CPU probes verify resource reuse and progress.
+
+One initial socket-backed QEMU run emitted `sshell` instead of `shell` in the
+serial banner, failing the exact boot marker despite reaching the prompt. The
+same unmodified assertions passed on rerun at all three RAM sizes. The cause of
+that isolated serial-output anomaly is not established; no assertion was relaxed.
+
+The subsequent full `make -C starter -j2 test` completed successfully, including
+all boot RAM sizes, fault/protection tests, host sanitizer/model tests, console,
+snapshot recovery, process isolation, multi-object IPC and disk execution.

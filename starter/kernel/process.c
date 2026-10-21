@@ -14,6 +14,9 @@ struct process {
     enum user_state state;
     unsigned managed;
     struct object *wait_object;
+    struct object *wait_objects[WAIT_ITEMS];
+    uint64_t wait_masks[WAIT_ITEMS];
+    unsigned wait_count;
     uint64_t wait_since, wait_ticks, wait_signals, wait_number;
 
 };
@@ -126,7 +129,11 @@ void user_tick(struct interrupt_frame *f) {
     running->frame = *f; running->state = USER_READY;
     host_return(f, 0);
 }
+static void clear_wait_many(struct process *p) {
+    while (p->wait_count) object_put(p->wait_objects[--p->wait_count]);
+}
 static void release(struct process *p) {
+    clear_wait_many(p);
     if (p->wait_object) { struct object *o = p->wait_object; p->wait_object = NULL; object_put(o); }
     if (p->context.transaction && p->context.filesystem) (void)fs_tx_end(p->context.filesystem, 1);
     p->context.transaction = p->context.active = 0;
@@ -148,11 +155,20 @@ static void wake_waiters(void) {
         uint64_t observed = 0;
         int expired = p->wait_ticks != UINT64_MAX && timer_now() - p->wait_since >= p->wait_ticks;
         int64_t status = p->wait_object ? signals(p->wait_object, p->wait_signals, &observed) : SYS_OK;
+        if (p->wait_count) {
+            for (unsigned j = 0; j < p->wait_count; j++) {
+                uint64_t ready = 0;
+                status = signals(p->wait_objects[j], p->wait_masks[j], &ready);
+                if (status) break;
+                if (ready) observed |= UINT64_C(1) << j;
+            }
+        }
         if (!status && !observed && !expired) continue;
-        if (!status && !observed && p->wait_object) status = SYS_ETIMEDOUT;
+        if (!status && !observed && (p->wait_object || p->wait_count)) status = SYS_ETIMEDOUT;
         p->frame.rax = (uint64_t)status; p->frame.rdx = status ? 0 : observed;
         error_record(&p->context.error, status, p->wait_number, 0);
         p->state = USER_READY;
+        clear_wait_many(p);
         if (p->wait_object) { struct object *o = p->wait_object; p->wait_object = NULL; object_put(o); }
     }
 }
@@ -318,8 +334,35 @@ restore:
     vm_space_select(&parent->space); vm_space_enter();
     return status;
 }
+/* Copy descriptors once; retain object pins, never user pointers, while asleep.
+ * Validate every entry even when an earlier object is already ready. */
+static int wait_many(struct interrupt_frame *f, struct syscall_result *result) {
+    uint64_t count = f->rsi, timeout = f->rdx, bitmap = 0;
+    struct wait_item items[WAIT_ITEMS];
+    int64_t status = SYS_EINVAL;
+    if (!count || count > WAIT_ITEMS || (timeout > UINT64_MAX/2 && timeout != UINT64_MAX)) goto done;
+    if (!vm_user_read(items, f->rdi, count * sizeof(items[0]))) { status = SYS_EFAULT; goto done; }
+    for (unsigned i = 0; i < count; i++) {
+        struct object *o;
+        status = object_status(handle_pin(&user_context.handles, items[i].handle, CAP_WAIT, &o));
+        if (status) goto done;
+        running->wait_objects[running->wait_count++] = o;
+        running->wait_masks[i] = items[i].signals;
+        uint64_t observed = 0;
+        status = o == &running->object ? SYS_EINVAL : signals(o, items[i].signals, &observed);
+        if (status) goto done;
+        if (observed) bitmap |= UINT64_C(1) << i;
+    }
+    if (!bitmap && timeout) return suspend(f, USER_WAITING, NULL, 0, timeout);
+    status = bitmap ? SYS_OK : SYS_EAGAIN;
+done:
+    clear_wait_many(running);
+    result->status = status; result->value = status ? 0 : bitmap;
+    return 1;
+}
 int process_services(struct interrupt_frame *f, struct syscall_result *result) {
     uint64_t number = f->rax;
+    if (number == SYS_WAIT_MANY) return wait_many(f, result);
     if (number == SYS_PROCESS_SPAWN) {
         result->status = spawn_from_user(f->rdi, f->rsi, f->rdx, f->r10, &result->value); return 1;
     }

@@ -1,4 +1,4 @@
-# Current scalar syscall ABI: x86_64 v1.3
+# Current scalar syscall ABI: x86_64 v1.4
 
 This is the current implementation contract. Earlier milestone notes describe
 historical versions. The calling convention is shared between kernel test callers
@@ -16,7 +16,7 @@ bytes only; no kernel pointers or native backend structures cross the boundary.
 
 | No. | Name | Arguments | Success value |
 | --- | --- | --- | --- |
-| 0 | ABI_QUERY | required_major=1 | `(1 << 32) \| 3` |
+| 0 | ABI_QUERY | required_major=1 | `(1 << 32) \| 4` |
 | 1 | HANDLE_CLOSE | handle | 0 |
 | 2 | HANDLE_DUPLICATE | source | same-rights handle; source requires DUPLICATE |
 | 3 | HANDLE_RESTRICT | handle, subset_mask | 0; local irreversible restriction |
@@ -40,6 +40,7 @@ bytes only; no kernel pointers or native backend structures cross the boundary.
 | 21 | OBJECT_WAIT | handle, signal_mask, timeout_ticks | observed signals; requires WAIT |
 | 22 | YIELD | none | 0 |
 | 23 | SLEEP | ticks | 0 |
+| 24 | WAIT_MANY | items_ptr, count, timeout_ticks | ready entry bitmap; WAIT on every handle |
 
 The first pipe handle has READ, second WRITE; both also have WAIT, DUPLICATE and TRANSFER; the 16-byte output contains little-
 endian native u64 tokens. Creation validates/prepares that output before installing
@@ -120,3 +121,7 @@ Self-wait is invalid and self-kill is denied (use EXIT). Exited children retain
 status until the last process capability closes, consuming a process slot.
 Public children can use explicitly granted files/directories, but TX_BEGIN still
 requires the trusted launch namespace and is unavailable to these children.
+
+WAIT_MANY accepts 1..8 `{uint64_t handle, signals;}` entries. It validates all
+entries, pins their objects, and returns bit i for each ready entry. Timeout rules
+match OBJECT_WAIT. See [milestone 18](18-wait-many.md) for lifetime and error rules.
